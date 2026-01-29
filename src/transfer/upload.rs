@@ -24,19 +24,32 @@ pub async fn upload_job(
 ) -> Result<JobResult> {
     let local_path = &job.file_meta.local_path;
 
-    // For chunked files, preallocate/truncate on first chunk
-    // For empty files, this creates the file
-    if job.chunk_index == Some(0) || job.chunk_index.is_none() {
-        let response = agent
-            .request(&Request::truncate(&job.file_meta.remote_path, job.file_meta.size))
-            .await?;
-        if !response.is_success() {
-            return Err(StrawsError::Remote(
-                response
-                    .error_message()
-                    .unwrap_or_else(|| "Truncate failed".to_string()),
-            ));
+    // Ensure remote file is truncated/created (only first chunk to reach here does the work)
+    // This avoids race conditions where chunk N runs before chunk 0
+    if !job.file_meta.truncate_attempted() {
+        let result = async {
+            let response = agent
+                .request(&Request::truncate(&job.file_meta.remote_path, job.file_meta.size))
+                .await?;
+            if !response.is_success() {
+                return Err(StrawsError::Remote(
+                    response
+                        .error_message()
+                        .unwrap_or_else(|| "Truncate failed".to_string()),
+                ));
+            }
+            Ok(())
         }
+        .await;
+
+        job.file_meta
+            .store_truncate_result(result.map_err(|e| e.to_string()))
+            .map_err(|e| StrawsError::Remote(e))?;
+    } else {
+        // Another chunk already attempted truncation, get the cached result
+        job.file_meta
+            .store_truncate_result(Ok(()))
+            .map_err(|e| StrawsError::Remote(e))?;
     }
 
     // Read local file and upload in chunks

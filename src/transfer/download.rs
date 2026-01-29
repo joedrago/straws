@@ -49,6 +49,13 @@ pub async fn download_job(
 
     writer.flush().await.map_err(|e| StrawsError::Io(e))?;
 
+    // Sync to disk before marking chunk complete to ensure durability on crash
+    writer
+        .get_mut()
+        .sync_all()
+        .await
+        .map_err(|e| StrawsError::Io(e))?;
+
     // Update file meta
     job.file_meta.add_bytes(bytes_written);
 

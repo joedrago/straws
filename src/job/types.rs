@@ -27,9 +27,15 @@ pub struct FileMeta {
     pub completed_chunks: Mutex<Vec<bool>>,
     /// Bytes transferred so far
     pub bytes_transferred: AtomicU64,
-    /// Preallocation result - ensures only one chunk preallocates
+    /// Preallocation result - ensures only one chunk preallocates (downloads)
     /// Ok(()) on success, Err(message) on failure
     prealloc_result: OnceLock<Result<(), String>>,
+    /// Truncation result - ensures only one chunk truncates remote file (uploads)
+    /// Ok(()) on success, Err(message) on failure
+    truncate_result: OnceLock<Result<(), String>>,
+    /// Finalization result - ensures only one chunk finalizes the file
+    /// Ok(()) on success, Err(message) on failure
+    finalize_result: OnceLock<Result<(), String>>,
 }
 
 impl fmt::Debug for FileMeta {
@@ -62,6 +68,8 @@ impl FileMeta {
             completed_chunks: Mutex::new(vec![false; total_chunks as usize]),
             bytes_transferred: AtomicU64::new(0),
             prealloc_result: OnceLock::new(),
+            truncate_result: OnceLock::new(),
+            finalize_result: OnceLock::new(),
         }
     }
 
@@ -98,6 +106,28 @@ impl FileMeta {
                 Ok(())
             })
             .clone()
+    }
+
+    /// Store truncation result. Only the first caller's result is stored;
+    /// subsequent callers get the cached result.
+    pub fn store_truncate_result(&self, result: Result<(), String>) -> Result<(), String> {
+        self.truncate_result.get_or_init(|| result).clone()
+    }
+
+    /// Check if truncation has been attempted (regardless of result)
+    pub fn truncate_attempted(&self) -> bool {
+        self.truncate_result.get().is_some()
+    }
+
+    /// Store finalization result. Only the first caller's result is stored;
+    /// subsequent callers get the cached result.
+    pub fn store_finalize_result(&self, result: Result<(), String>) -> Result<(), String> {
+        self.finalize_result.get_or_init(|| result).clone()
+    }
+
+    /// Check if finalization has been attempted (regardless of result)
+    pub fn finalize_attempted(&self) -> bool {
+        self.finalize_result.get().is_some()
     }
 
     pub fn mark_chunk_complete(&self, chunk_index: u32) {

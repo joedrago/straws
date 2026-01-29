@@ -333,8 +333,10 @@ async fn worker_loop(
             Ok(job_result) => {
                 pool.release(&agent);
 
-                // Check if file complete
-                if job.file_meta.is_complete() {
+                // Check if file complete and not already finalized by another worker
+                // The finalize_attempted() check ensures only one worker handles completion
+                // even if multiple chunks complete nearly simultaneously
+                if job.file_meta.is_complete() && !job.file_meta.finalize_attempted() {
                     // Finalize file (for downloads)
                     if job.direction == JobDirection::Download {
                         if let Err(e) = finalize_file(&job.file_meta) {
@@ -352,6 +354,8 @@ async fn worker_loop(
                             tracker.file_completed(&name, md5.clone(), md5, job.file_meta.mode, job.file_meta.mtime);
                         }
                     } else {
+                        // For uploads, mark as finalized to prevent duplicate completion tracking
+                        let _ = job.file_meta.store_finalize_result(Ok(()));
                         let name = job
                             .file_meta
                             .local_path

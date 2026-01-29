@@ -10,21 +10,27 @@ use crate::job::types::FileMeta;
 use super::metadata::{set_mode, set_mtime};
 
 /// Finalize a completed file: rename temp to final, set mode and mtime
+/// Uses OnceLock pattern to ensure only one chunk finalizes even if multiple
+/// chunks complete nearly simultaneously.
 pub fn finalize_file(file_meta: &Arc<FileMeta>) -> Result<()> {
+    // Use OnceLock to ensure only one caller does the actual finalization
+    let result = file_meta.store_finalize_result(do_finalize(file_meta));
+    result.map_err(|e| StrawsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))
+}
+
+/// Internal finalization logic
+fn do_finalize(file_meta: &FileMeta) -> std::result::Result<(), String> {
     let temp_path = file_meta.temp_path();
     let final_path = &file_meta.local_path;
 
     // Rename temp to final
     std::fs::rename(&temp_path, final_path).map_err(|e| {
-        StrawsError::Io(std::io::Error::new(
-            e.kind(),
-            format!(
-                "Failed to rename {} to {}: {}",
-                temp_path.display(),
-                final_path.display(),
-                e
-            ),
-        ))
+        format!(
+            "Failed to rename {} to {}: {}",
+            temp_path.display(),
+            final_path.display(),
+            e
+        )
     })?;
 
     // Set mode (only user bits, preserve umask behavior)
