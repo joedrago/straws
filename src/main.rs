@@ -80,7 +80,7 @@ async fn run() -> Result<()> {
 
     // Create job queue and scheduler
     let queue = JobQueue::new();
-    let scheduler = JobScheduler::new(config.clone(), queue.clone());
+    let scheduler = Arc::new(JobScheduler::new(config.clone(), queue.clone()));
 
     // Create progress tracker
     let tracker = Arc::new(ProgressTracker::new(config.tunnels));
@@ -90,14 +90,31 @@ async fn run() -> Result<()> {
     eprint!("\rScanning{}: 0 files found", verify_note);
     let _ = std::io::Write::flush(&mut std::io::stderr());
 
-    match config.direction {
-        Direction::Download => {
-            scheduler.schedule_downloads(&pool).await?;
+    // Spawn a task to update scanning progress
+    let progress_task = tokio::spawn({
+        let scheduler = Arc::clone(&scheduler);
+        let verify_note = verify_note.to_string();
+        async move {
+            let mut last_count = 0u64;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                let count = scheduler.files_found();
+                if count != last_count {
+                    eprint!("\rScanning{}: {} files found", verify_note, count);
+                    let _ = std::io::Write::flush(&mut std::io::stderr());
+                    last_count = count;
+                }
+            }
         }
-        Direction::Upload => {
-            scheduler.schedule_uploads(&pool).await?;
-        }
-    }
+    });
+
+    let schedule_result = match config.direction {
+        Direction::Download => scheduler.schedule_downloads(&pool).await,
+        Direction::Upload => scheduler.schedule_uploads(&pool).await,
+    };
+
+    progress_task.abort();
+    schedule_result?;
 
     eprintln!("\rScanning{}: {} files found       ", verify_note, scheduler.total_files());
 

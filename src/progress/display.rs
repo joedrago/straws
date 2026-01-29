@@ -196,40 +196,43 @@ impl ProgressDisplay {
             }
         }
 
-        // Recent files (if verbose)
-        if self.verbose {
-            let recent = self.tracker.recent_files();
-            if !recent.is_empty() {
-                let _ = execute!(stdout, Print("\n"));
-                let _ = execute!(
-                    stdout,
-                    SetForegroundColor(Color::DarkGrey),
-                    Print("  Recent:\n"),
-                    ResetColor
-                );
-                for file in recent.iter().rev().take(5) {
+        // Recent completed files
+        let recent = self.tracker.recent_files();
+        if !recent.is_empty() {
+            let _ = execute!(stdout, Print("\n"));
+            let _ = execute!(
+                stdout,
+                SetForegroundColor(Color::DarkGrey),
+                Print("  Recent:\n"),
+                ResetColor
+            );
+            for file in recent.iter().rev().take(5) {
+                let extra_info = if self.verbose {
+                    // Verbose: show MD5, mode, mtime
                     let md5_str = if let (Some(local), Some(remote)) = (&file.local_md5, &file.remote_md5) {
                         format!(" ({} = {})", local, remote)
                     } else {
                         String::new()
                     };
-                    let display_str = format!(
-                        "{}{} mode={:04o} mtime={}",
-                        file.name,
-                        md5_str,
-                        file.mode & 0o7777,
-                        file.mtime
-                    );
-                    let _ = execute!(
-                        stdout,
-                        Print("    "),
-                        SetForegroundColor(Color::Green),
-                        Print("✓ "),
-                        ResetColor,
-                        Print(truncate(&display_str, width.saturating_sub(6))),
-                        Print("\n")
-                    );
-                }
+                    format!("{} mode={:04o} mtime={}", md5_str, file.mode & 0o7777, file.mtime)
+                } else {
+                    // Non-verbose: just show checkmark if verified
+                    if file.local_md5.is_some() {
+                        " ✓".to_string()
+                    } else {
+                        String::new()
+                    }
+                };
+                let display_str = format!("{}{}", file.name, extra_info);
+                let _ = execute!(
+                    stdout,
+                    Print("    "),
+                    SetForegroundColor(Color::Green),
+                    Print("✓ "),
+                    ResetColor,
+                    Print(truncate(&display_str, width.saturating_sub(6))),
+                    Print("\n")
+                );
             }
         }
 

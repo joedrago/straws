@@ -19,6 +19,8 @@ pub struct JobScheduler {
     total_bytes: AtomicU64,
     total_files: AtomicU64,
     files_skipped: AtomicU64,
+    /// Files found during scanning (for progress updates)
+    files_found: AtomicU64,
 }
 
 impl JobScheduler {
@@ -30,6 +32,7 @@ impl JobScheduler {
             total_bytes: AtomicU64::new(0),
             total_files: AtomicU64::new(0),
             files_skipped: AtomicU64::new(0),
+            files_found: AtomicU64::new(0),
         }
     }
 
@@ -47,6 +50,11 @@ impl JobScheduler {
 
     pub fn files_skipped(&self) -> u64 {
         self.files_skipped.load(Ordering::Relaxed)
+    }
+
+    /// Get count of files found during scanning (for progress display)
+    pub fn files_found(&self) -> u64 {
+        self.files_found.load(Ordering::Relaxed)
     }
 
     /// Enumerate files and create jobs for download
@@ -195,6 +203,7 @@ impl JobScheduler {
                 if pool.is_aborted() {
                     return false;
                 }
+                self.files_found.fetch_add(1, Ordering::Relaxed);
                 entries.push(entry);
                 true
             })
