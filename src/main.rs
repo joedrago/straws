@@ -190,15 +190,6 @@ async fn run() -> Result<()> {
                 cleanup_temp(meta);
             }
         }
-        drop(files);
-
-        // Clean up any preallocated temp files from scheduling
-        for temp_path in scheduler.temp_files() {
-            if temp_path.exists() {
-                debug_log!("Removing preallocated temp file: {}", temp_path.display());
-                let _ = std::fs::remove_file(&temp_path);
-            }
-        }
     }
 
     // Shutdown agents

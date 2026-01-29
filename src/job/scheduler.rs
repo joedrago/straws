@@ -2,8 +2,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use parking_lot::Mutex;
-
 use super::queue::JobQueue;
 use super::types::{Direction, FileMeta, Job};
 use crate::agent::protocol::{Request, StatInfo};
@@ -11,7 +9,6 @@ use crate::agent::AgentPool;
 use crate::config::Config;
 use crate::debug_log;
 use crate::error::{Result, StrawsError};
-use crate::file::sparse::preallocate_sync;
 
 /// Schedules jobs based on file enumeration
 pub struct JobScheduler {
@@ -20,8 +17,6 @@ pub struct JobScheduler {
     job_id_counter: AtomicU64,
     total_bytes: AtomicU64,
     total_files: AtomicU64,
-    /// Temp files created during scheduling (for cleanup on abort)
-    temp_files: Mutex<Vec<PathBuf>>,
 }
 
 impl JobScheduler {
@@ -32,7 +27,6 @@ impl JobScheduler {
             job_id_counter: AtomicU64::new(0),
             total_bytes: AtomicU64::new(0),
             total_files: AtomicU64::new(0),
-            temp_files: Mutex::new(Vec::new()),
         }
     }
 
@@ -46,11 +40,6 @@ impl JobScheduler {
 
     pub fn total_files(&self) -> u64 {
         self.total_files.load(Ordering::Relaxed)
-    }
-
-    /// Get list of temp files created during scheduling (for cleanup)
-    pub fn temp_files(&self) -> Vec<PathBuf> {
-        self.temp_files.lock().clone()
     }
 
     /// Enumerate files and create jobs for download
@@ -209,24 +198,6 @@ impl JobScheduler {
         // Determine chunking
         let chunk_threshold = self.config.chunk_size;
         let should_chunk = stat.size >= chunk_threshold && tunnel_count > 1;
-
-        // Preallocate temp file upfront (before queuing jobs) to avoid race conditions
-        // between chunks trying to write to the same file
-        let temp_path = {
-            let mut path = local_path.clone();
-            let file_name = path
-                .file_name()
-                .map(|n| format!("{}.straws.tmp", n.to_string_lossy()))
-                .unwrap_or_else(|| ".straws.tmp".to_string());
-            path.set_file_name(file_name);
-            path
-        };
-
-        if stat.size > 0 {
-            preallocate_sync(&temp_path, stat.size)?;
-            // Track for cleanup on abort
-            self.temp_files.lock().push(temp_path);
-        }
 
         if should_chunk {
             // Calculate chunk count: divide by tunnel count but cap at reasonable size

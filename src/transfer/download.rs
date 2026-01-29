@@ -19,8 +19,10 @@ const IO_BUFFER_SIZE: usize = 65536; // 64KB
 pub async fn download_job(job: &Arc<Job>, agent: &Arc<Agent>) -> Result<JobResult> {
     let temp_path = job.file_meta.temp_path();
 
-    // Note: Preallocation is done during job scheduling, not here,
-    // to avoid race conditions between chunks of the same file.
+    // Ensure file is preallocated (only first chunk does the work, others wait/get cached result)
+    job.file_meta
+        .ensure_preallocated()
+        .map_err(|e| StrawsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
 
     // Open temp file at correct offset
     let file = open_write_at(&temp_path, job.offset).await?;

@@ -142,20 +142,26 @@ def handle_find(base_path):
     """Recursively find all files and stream their stats.
     Response format: status(1) then streamed entries, each:
       path_len(2) + path(utf8) + size(8) + mode(4) + mtime(8)
+    Paths are returned relative to base_path (preserving the user's path format).
     Terminated by path_len=0.
     """
     try:
-        base = base_path  # Already expanded/resolved in main()
+        # Expand ~ but keep the path format for consistent prefix stripping on client
+        base = os.path.expanduser(base_path)
         sys.stdout.buffer.write(struct.pack('>B', 0))  # success status
 
-        def send_entry(fpath, st):
-            path_bytes = fpath.encode('utf-8')
+        def send_entry(rel_path, st):
+            """Send entry with path relative to user-provided base_path"""
+            # Combine user's original base_path with relative portion
+            full_path = os.path.join(base_path, rel_path) if rel_path else base_path
+            path_bytes = full_path.encode('utf-8')
             sys.stdout.buffer.write(struct.pack('>H', len(path_bytes)))
             sys.stdout.buffer.write(path_bytes)
             sys.stdout.buffer.write(struct.pack('>QIQ', st.st_size, st.st_mode, int(st.st_mtime)))
 
         if os.path.isfile(base):
-            send_entry(base, os.stat(base))
+            # Single file - return with original base_path
+            send_entry('', os.stat(base))
         else:
             for root, dirs, filenames in os.walk(base):
                 for fname in filenames:
@@ -163,7 +169,9 @@ def handle_find(base_path):
                     try:
                         st = os.stat(fpath)
                         if os.path.isfile(fpath):
-                            send_entry(fpath, st)
+                            # Get path relative to expanded base, then join with original base_path
+                            rel = os.path.relpath(fpath, base)
+                            send_entry(rel, st)
                     except (OSError, IOError):
                         continue
 
@@ -194,8 +202,8 @@ def main():
             write_error('Invalid UTF-8 in path')
             continue
 
-        # Expand ~ and resolve relative paths
-        path = os.path.abspath(os.path.expanduser(path))
+        # Expand ~ to home directory (but preserve relative paths)
+        path = os.path.expanduser(path)
 
         # Read offset(8) + length(8)
         nums = read_exact(16)

@@ -1,9 +1,10 @@
 // Copyright (c) 2025, Joe Drago <joedrago@gmail.com>
 // SPDX-License-Identifier: BSD-2-Clause
 
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use parking_lot::Mutex;
 
@@ -14,7 +15,6 @@ pub enum Direction {
 }
 
 /// Metadata for a file being transferred
-#[derive(Debug)]
 pub struct FileMeta {
     pub remote_path: String,
     pub local_path: PathBuf,
@@ -27,6 +27,20 @@ pub struct FileMeta {
     pub completed_chunks: Mutex<Vec<bool>>,
     /// Bytes transferred so far
     pub bytes_transferred: AtomicU64,
+    /// Preallocation result - ensures only one chunk preallocates
+    /// Ok(()) on success, Err(message) on failure
+    prealloc_result: OnceLock<Result<(), String>>,
+}
+
+impl fmt::Debug for FileMeta {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FileMeta")
+            .field("remote_path", &self.remote_path)
+            .field("local_path", &self.local_path)
+            .field("size", &self.size)
+            .field("total_chunks", &self.total_chunks)
+            .finish_non_exhaustive()
+    }
 }
 
 impl FileMeta {
@@ -47,7 +61,43 @@ impl FileMeta {
             total_chunks,
             completed_chunks: Mutex::new(vec![false; total_chunks as usize]),
             bytes_transferred: AtomicU64::new(0),
+            prealloc_result: OnceLock::new(),
         }
+    }
+
+    /// Ensure the temp file is preallocated. Only the first caller does the work;
+    /// subsequent callers get the cached result.
+    pub fn ensure_preallocated(&self) -> Result<(), String> {
+        self.prealloc_result
+            .get_or_init(|| {
+                let temp_path = self.temp_path();
+
+                // Ensure parent directory exists
+                if let Some(parent) = temp_path.parent() {
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        return Err(format!("Failed to create directory: {}", e));
+                    }
+                }
+
+                // Create and preallocate the file
+                let file = match std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .open(&temp_path)
+                {
+                    Ok(f) => f,
+                    Err(e) => return Err(format!("Failed to create temp file: {}", e)),
+                };
+
+                if self.size > 0 {
+                    if let Err(e) = file.set_len(self.size) {
+                        return Err(format!("Failed to preallocate: {}", e));
+                    }
+                }
+
+                Ok(())
+            })
+            .clone()
     }
 
     pub fn mark_chunk_complete(&self, chunk_index: u32) {
