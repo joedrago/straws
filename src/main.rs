@@ -333,7 +333,7 @@ async fn worker_loop(
                                 .unwrap_or_default();
                             // For non-chunked files with verify, both MD5s match (already verified)
                             let md5 = job_result.md5.clone();
-                            tracker.file_completed(&name, md5.clone(), md5);
+                            tracker.file_completed(&name, md5.clone(), md5, job.file_meta.mode, job.file_meta.mtime);
                         }
                     } else {
                         let name = job
@@ -344,7 +344,7 @@ async fn worker_loop(
                             .unwrap_or_default();
                         // For non-chunked files with verify, both MD5s match (already verified)
                         let md5 = job_result.md5.clone();
-                        tracker.file_completed(&name, md5.clone(), md5);
+                        tracker.file_completed(&name, md5.clone(), md5, job.file_meta.mode, job.file_meta.mtime);
                     }
 
                     // Remove from active files

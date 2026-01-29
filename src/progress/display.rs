@@ -208,11 +208,18 @@ impl ProgressDisplay {
                     ResetColor
                 );
                 for file in recent.iter().rev().take(5) {
-                    let display_str = if let (Some(local), Some(remote)) = (&file.local_md5, &file.remote_md5) {
-                        format!("{} ({} = {})", file.name, local, remote)
+                    let md5_str = if let (Some(local), Some(remote)) = (&file.local_md5, &file.remote_md5) {
+                        format!(" ({} = {})", local, remote)
                     } else {
-                        file.name.clone()
+                        String::new()
                     };
+                    let display_str = format!(
+                        "{}{} mode={:04o} mtime={}",
+                        file.name,
+                        md5_str,
+                        file.mode & 0o7777,
+                        file.mtime
+                    );
                     let _ = execute!(
                         stdout,
                         Print("    "),

@@ -292,17 +292,13 @@ impl JobScheduler {
         self.total_bytes.fetch_add(stat.size, Ordering::Relaxed);
         self.total_files.fetch_add(1, Ordering::Relaxed);
 
-        // Determine chunking
-        let chunk_threshold = self.config.chunk_size;
-        let should_chunk = stat.size >= chunk_threshold && tunnel_count > 1;
+        // Determine chunking - split large files into chunk_size pieces
+        let chunk_size = self.config.chunk_size;
+        let should_chunk = stat.size > chunk_size && tunnel_count > 1;
 
         if should_chunk {
-            // Calculate chunk count: divide by tunnel count but cap at reasonable size
-            let chunk_count = std::cmp::min(
-                tunnel_count as u64,
-                (stat.size + chunk_threshold - 1) / chunk_threshold,
-            ) as u32;
-            let chunk_size = (stat.size + chunk_count as u64 - 1) / chunk_count as u64;
+            // Calculate chunk count based on configured chunk size
+            let chunk_count = ((stat.size + chunk_size - 1) / chunk_size) as u32;
 
             let file_meta = Arc::new(FileMeta::new(
                 remote_path.to_string(),
@@ -313,7 +309,7 @@ impl JobScheduler {
                 chunk_count,
             ));
 
-            // Create chunk jobs
+            // Create chunk jobs - each chunk is at most chunk_size bytes
             for i in 0..chunk_count {
                 let offset = i as u64 * chunk_size;
                 let length = std::cmp::min(chunk_size, stat.size.saturating_sub(offset));
@@ -460,15 +456,13 @@ impl JobScheduler {
         self.total_bytes.fetch_add(size, Ordering::Relaxed);
         self.total_files.fetch_add(1, Ordering::Relaxed);
 
-        let chunk_threshold = self.config.chunk_size;
-        let should_chunk = size >= chunk_threshold && tunnel_count > 1;
+        // Determine chunking - split large files into chunk_size pieces
+        let chunk_size = self.config.chunk_size;
+        let should_chunk = size > chunk_size && tunnel_count > 1;
 
         if should_chunk {
-            let chunk_count = std::cmp::min(
-                tunnel_count as u64,
-                (size + chunk_threshold - 1) / chunk_threshold,
-            ) as u32;
-            let chunk_size = (size + chunk_count as u64 - 1) / chunk_count as u64;
+            // Calculate chunk count based on configured chunk size
+            let chunk_count = ((size + chunk_size - 1) / chunk_size) as u32;
 
             let file_meta = Arc::new(FileMeta::new(
                 remote_path.to_string(),
@@ -479,6 +473,7 @@ impl JobScheduler {
                 chunk_count,
             ));
 
+            // Create chunk jobs - each chunk is at most chunk_size bytes
             for i in 0..chunk_count {
                 let offset = i as u64 * chunk_size;
                 let length = std::cmp::min(chunk_size, size.saturating_sub(offset));

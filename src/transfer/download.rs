@@ -81,10 +81,12 @@ pub async fn download_job(job: &Arc<Job>, agent: &Arc<Agent>) -> Result<JobResul
         }
 
         debug_log!(
-            "Verified {} ({} = {})",
+            "Verified {} ({} = {}) mode={:04o} mtime={}",
             job.file_meta.remote_path,
             local_md5,
-            remote_md5
+            remote_md5,
+            job.file_meta.mode & 0o7777,
+            job.file_meta.mtime
         );
 
         Some(local_md5)

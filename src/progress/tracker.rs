@@ -21,6 +21,8 @@ pub struct CompletedFile {
     pub name: String,
     pub local_md5: Option<String>,
     pub remote_md5: Option<String>,
+    pub mode: u32,
+    pub mtime: u64,
 }
 
 /// Thread-safe progress tracking
@@ -120,7 +122,7 @@ impl ProgressTracker {
         self.speed_tracker.lock().add_bytes(bytes);
     }
 
-    pub fn file_completed(&self, name: &str, local_md5: Option<String>, remote_md5: Option<String>) {
+    pub fn file_completed(&self, name: &str, local_md5: Option<String>, remote_md5: Option<String>, mode: u32, mtime: u64) {
         self.files_completed.fetch_add(1, Ordering::Relaxed);
 
         let mut recent = self.recent_files.lock();
@@ -128,6 +130,8 @@ impl ProgressTracker {
             name: name.to_string(),
             local_md5,
             remote_md5,
+            mode,
+            mtime,
         });
         if recent.len() > 5 {
             recent.remove(0);
