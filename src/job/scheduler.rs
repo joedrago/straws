@@ -1,0 +1,431 @@
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+use super::queue::JobQueue;
+use super::types::{Direction, FileMeta, Job};
+use crate::agent::protocol::{Request, StatInfo};
+use crate::agent::AgentPool;
+use crate::config::Config;
+use crate::debug_log;
+use crate::error::{Result, StrawsError};
+
+/// Schedules jobs based on file enumeration
+pub struct JobScheduler {
+    config: Config,
+    queue: JobQueue,
+    job_id_counter: AtomicU64,
+    total_bytes: AtomicU64,
+    total_files: AtomicU64,
+}
+
+impl JobScheduler {
+    pub fn new(config: Config, queue: JobQueue) -> Self {
+        JobScheduler {
+            config,
+            queue,
+            job_id_counter: AtomicU64::new(0),
+            total_bytes: AtomicU64::new(0),
+            total_files: AtomicU64::new(0),
+        }
+    }
+
+    fn next_job_id(&self) -> u64 {
+        self.job_id_counter.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub fn total_bytes(&self) -> u64 {
+        self.total_bytes.load(Ordering::Relaxed)
+    }
+
+    pub fn total_files(&self) -> u64 {
+        self.total_files.load(Ordering::Relaxed)
+    }
+
+    /// Enumerate files and create jobs for download
+    pub async fn schedule_downloads(&self, pool: &AgentPool) -> Result<()> {
+        let remote_paths: Vec<&str> = self.config.remote.path.split('\0').collect();
+        let local_dest = &self.config.local_paths[0];
+
+        // Ensure local destination exists and is a directory if multiple sources
+        if remote_paths.len() > 1 || self.config.remote.path.contains('*') {
+            tokio::fs::create_dir_all(local_dest)
+                .await
+                .map_err(|e| StrawsError::Io(e))?;
+        }
+
+        for remote_path in remote_paths {
+            if pool.is_aborted() {
+                break;
+            }
+            self.schedule_download_path(pool, remote_path, local_dest)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn schedule_download_path(
+        &self,
+        pool: &AgentPool,
+        remote_path: &str,
+        local_dest: &PathBuf,
+    ) -> Result<()> {
+        // Check if remote path is a file or directory using stat
+        let agent = pool.acquire().ok_or(StrawsError::AllAgentsUnhealthy)?;
+
+        let stat_result = agent.request(&Request::stat(remote_path)).await;
+        pool.release(&agent);
+
+        match stat_result {
+            Ok(response) if response.is_success() => {
+                let stat = response.parse_stat()?;
+                let is_dir = (stat.mode & 0o170000) == 0o040000;
+
+                if is_dir {
+                    self.enumerate_remote_directory(pool, remote_path, local_dest)
+                        .await?;
+                } else {
+                    // Single file
+                    let file_name = PathBuf::from(remote_path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "download".to_string());
+
+                    let local_path = if local_dest.is_dir()
+                        || local_dest.to_string_lossy().ends_with('/')
+                    {
+                        local_dest.join(&file_name)
+                    } else {
+                        local_dest.clone()
+                    };
+
+                    self.create_download_jobs(remote_path, &local_path, stat, pool.agents().len())
+                        .await?;
+                }
+            }
+            Ok(response) => {
+                let msg = response.error_message().unwrap_or_else(|| "Unknown error".to_string());
+                if msg.contains("not found") {
+                    return Err(StrawsError::NotFound(remote_path.to_string()));
+                }
+                return Err(StrawsError::Remote(msg));
+            }
+            Err(e) => return Err(e),
+        }
+
+        Ok(())
+    }
+
+    async fn enumerate_remote_directory(
+        &self,
+        pool: &AgentPool,
+        remote_dir: &str,
+        local_base: &PathBuf,
+    ) -> Result<()> {
+        // Use an agent to enumerate files via the FIND protocol command
+        let agent = pool
+            .acquire()
+            .ok_or_else(|| StrawsError::Connection("No agents available for enumeration".into()))?;
+
+        debug_log!("Enumerating remote directory via agent: {}", remote_dir);
+
+        let tunnel_count = pool.agents().len();
+        let remote_dir_path = PathBuf::from(remote_dir);
+        let local_base = local_base.clone();
+
+        // Collect entries to process (we need to release agent before creating jobs)
+        let mut entries = Vec::new();
+
+        agent
+            .find(remote_dir, |entry| {
+                if pool.is_aborted() {
+                    return false;
+                }
+                entries.push(entry);
+                true
+            })
+            .await?;
+
+        // Release agent back to pool
+        pool.release(&agent);
+
+        // Now create jobs for each entry
+        for entry in entries {
+            if pool.is_aborted() {
+                break;
+            }
+
+            let remote_file_path = PathBuf::from(&entry.path);
+            let relative = remote_file_path
+                .strip_prefix(&remote_dir_path)
+                .unwrap_or(&remote_file_path);
+            let local_path = local_base.join(relative);
+
+            let stat = StatInfo {
+                size: entry.size,
+                mode: entry.mode,
+                mtime: entry.mtime,
+            };
+            self.create_download_jobs(&entry.path, &local_path, stat, tunnel_count)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn create_download_jobs(
+        &self,
+        remote_path: &str,
+        local_path: &PathBuf,
+        stat: StatInfo,
+        tunnel_count: usize,
+    ) -> Result<()> {
+        // Check if file already exists and is complete
+        if let Ok(local_meta) = tokio::fs::metadata(local_path).await {
+            if local_meta.len() == stat.size {
+                debug_log!(
+                    "Skipping existing file: {} (size matches)",
+                    local_path.display()
+                );
+                return Ok(());
+            }
+        }
+
+        self.total_bytes.fetch_add(stat.size, Ordering::Relaxed);
+        self.total_files.fetch_add(1, Ordering::Relaxed);
+
+        // Determine chunking
+        let chunk_threshold = self.config.chunk_size;
+        let should_chunk = stat.size >= chunk_threshold && tunnel_count > 1;
+
+        if should_chunk {
+            // Calculate chunk count: divide by tunnel count but cap at reasonable size
+            let chunk_count = std::cmp::min(
+                tunnel_count as u64,
+                (stat.size + chunk_threshold - 1) / chunk_threshold,
+            ) as u32;
+            let chunk_size = (stat.size + chunk_count as u64 - 1) / chunk_count as u64;
+
+            let file_meta = Arc::new(FileMeta::new(
+                remote_path.to_string(),
+                local_path.clone(),
+                stat.size,
+                stat.mode,
+                stat.mtime,
+                chunk_count,
+            ));
+
+            // Create chunk jobs
+            for i in 0..chunk_count {
+                let offset = i as u64 * chunk_size;
+                let length = std::cmp::min(chunk_size, stat.size.saturating_sub(offset));
+
+                if length > 0 {
+                    let job = Arc::new(Job::chunk(
+                        self.next_job_id(),
+                        Arc::clone(&file_meta),
+                        Direction::Download,
+                        i,
+                        offset,
+                        length,
+                        self.config.verify,
+                    ));
+                    self.queue.push(job);
+                }
+            }
+
+            debug_log!(
+                "Scheduled chunked download: {} ({} chunks)",
+                remote_path,
+                chunk_count
+            );
+        } else {
+            // Single job for whole file
+            let file_meta = Arc::new(FileMeta::new(
+                remote_path.to_string(),
+                local_path.clone(),
+                stat.size,
+                stat.mode,
+                stat.mtime,
+                1,
+            ));
+
+            let job = Arc::new(Job::whole_file(
+                self.next_job_id(),
+                file_meta,
+                Direction::Download,
+                self.config.verify,
+            ));
+            self.queue.push(job);
+
+            debug_log!("Scheduled download: {}", remote_path);
+        }
+
+        Ok(())
+    }
+
+    /// Schedule upload jobs
+    pub async fn schedule_uploads(&self, pool: &AgentPool) -> Result<()> {
+        let remote_dest = &self.config.remote.path;
+
+        for local_path in &self.config.local_paths {
+            if pool.is_aborted() {
+                break;
+            }
+
+            let metadata = tokio::fs::metadata(local_path)
+                .await
+                .map_err(|e| StrawsError::Io(e))?;
+
+            if metadata.is_dir() {
+                self.enumerate_local_directory(pool, local_path, remote_dest)
+                    .await?;
+            } else {
+                let file_name = local_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "upload".to_string());
+
+                let remote_path = if remote_dest.ends_with('/') {
+                    format!("{}{}", remote_dest, file_name)
+                } else {
+                    remote_dest.clone()
+                };
+
+                self.create_upload_jobs(local_path, &remote_path, &metadata, pool.agents().len())
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn enumerate_local_directory(
+        &self,
+        pool: &AgentPool,
+        local_dir: &PathBuf,
+        remote_base: &str,
+    ) -> Result<()> {
+        let mut entries = tokio::fs::read_dir(local_dir)
+            .await
+            .map_err(|e| StrawsError::Io(e))?;
+
+        while let Some(entry) = entries.next_entry().await.map_err(|e| StrawsError::Io(e))? {
+            if pool.is_aborted() {
+                break;
+            }
+
+            let path = entry.path();
+            let metadata = entry.metadata().await.map_err(|e| StrawsError::Io(e))?;
+
+            let relative = path
+                .strip_prefix(local_dir)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| {
+                    path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                });
+
+            let remote_path = format!("{}/{}", remote_base.trim_end_matches('/'), relative);
+
+            if metadata.is_dir() {
+                // Recursively enumerate
+                Box::pin(self.enumerate_local_directory(pool, &path, &remote_path)).await?;
+            } else {
+                self.create_upload_jobs(&path, &remote_path, &metadata, pool.agents().len())
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn create_upload_jobs(
+        &self,
+        local_path: &PathBuf,
+        remote_path: &str,
+        metadata: &std::fs::Metadata,
+        tunnel_count: usize,
+    ) -> Result<()> {
+        use std::os::unix::fs::MetadataExt;
+
+        let size = metadata.len();
+        let mode = metadata.mode();
+        let mtime = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        self.total_bytes.fetch_add(size, Ordering::Relaxed);
+        self.total_files.fetch_add(1, Ordering::Relaxed);
+
+        let chunk_threshold = self.config.chunk_size;
+        let should_chunk = size >= chunk_threshold && tunnel_count > 1;
+
+        if should_chunk {
+            let chunk_count = std::cmp::min(
+                tunnel_count as u64,
+                (size + chunk_threshold - 1) / chunk_threshold,
+            ) as u32;
+            let chunk_size = (size + chunk_count as u64 - 1) / chunk_count as u64;
+
+            let file_meta = Arc::new(FileMeta::new(
+                remote_path.to_string(),
+                local_path.clone(),
+                size,
+                mode,
+                mtime,
+                chunk_count,
+            ));
+
+            for i in 0..chunk_count {
+                let offset = i as u64 * chunk_size;
+                let length = std::cmp::min(chunk_size, size.saturating_sub(offset));
+
+                if length > 0 {
+                    let job = Arc::new(Job::chunk(
+                        self.next_job_id(),
+                        Arc::clone(&file_meta),
+                        Direction::Upload,
+                        i,
+                        offset,
+                        length,
+                        self.config.verify,
+                    ));
+                    self.queue.push(job);
+                }
+            }
+
+            debug_log!(
+                "Scheduled chunked upload: {} ({} chunks)",
+                remote_path,
+                chunk_count
+            );
+        } else {
+            let file_meta = Arc::new(FileMeta::new(
+                remote_path.to_string(),
+                local_path.clone(),
+                size,
+                mode,
+                mtime,
+                1,
+            ));
+
+            let job = Arc::new(Job::whole_file(
+                self.next_job_id(),
+                file_meta,
+                Direction::Upload,
+                self.config.verify,
+            ));
+            self.queue.push(job);
+
+            debug_log!("Scheduled upload: {}", remote_path);
+        }
+
+        Ok(())
+    }
+}
