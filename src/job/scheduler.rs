@@ -381,7 +381,31 @@ impl JobScheduler {
                 .map_err(|e| StrawsError::Io(e))?;
 
             if metadata.is_dir() {
-                self.enumerate_local_directory(pool, local_path, remote_dest)
+                // Trailing slash on local path means "copy contents" (rsync convention)
+                // foo/  → copy contents to dest
+                // foo   → copy foo directory to dest (preserving name)
+                let copy_contents_only = local_path.to_string_lossy().ends_with('/');
+
+                let remote_base = if copy_contents_only {
+                    // Local has trailing slash: copy contents directly to destination
+                    remote_dest.clone()
+                } else {
+                    // No trailing slash: preserve directory name
+                    let dir_name = local_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "upload".to_string());
+
+                    if remote_dest.ends_with('/') {
+                        // Explicit directory destination: append dir name
+                        format!("{}{}", remote_dest, dir_name)
+                    } else {
+                        // Use remote_dest as the target name
+                        remote_dest.clone()
+                    }
+                };
+
+                self.enumerate_local_directory(pool, local_path, &remote_base)
                     .await?;
             } else {
                 let file_name = local_path
