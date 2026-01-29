@@ -19,7 +19,7 @@ use crate::agent::{AgentPool, AgentState};
 
 const RENDER_INTERVAL_MS: u64 = 250;
 const PROGRESS_BAR_WIDTH: usize = 40;
-const CELL_WIDTH: usize = 22;
+const CELL_WIDTH: usize = 32;
 
 pub struct ProgressDisplay {
     tracker: Arc<ProgressTracker>,

@@ -219,10 +219,10 @@ impl Job {
 
         match self.chunk_index {
             Some(idx) => format!(
-                "{} [{}/{}]",
-                file_name,
+                "[{}/{}] {}",
                 idx + 1,
-                self.file_meta.total_chunks
+                self.file_meta.total_chunks,
+                file_name
             ),
             None => file_name,
         }
