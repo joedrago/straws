@@ -84,21 +84,36 @@ impl JobScheduler {
                 let is_dir = (stat.mode & 0o170000) == 0o040000;
 
                 if is_dir {
-                    // Preserve directory name: server:foo → ./foo/
-                    let dir_name = PathBuf::from(remote_path)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "download".to_string());
+                    // Trailing slash on remote path means "copy contents" (rsync convention)
+                    // server:foo/ → copy contents to dest
+                    // server:foo  → copy foo directory to dest (preserving name)
+                    let copy_contents_only = remote_path.ends_with('/');
 
-                    let local_base = if local_dest.to_string_lossy().ends_with('/') {
-                        // Explicit directory destination: use as-is with dir name
-                        local_dest.join(&dir_name)
-                    } else if local_dest.is_dir() {
-                        // Existing directory: add the remote dir name
-                        local_dest.join(&dir_name)
+                    let local_base = if copy_contents_only {
+                        // Remote has trailing slash: copy contents directly to destination
+                        if local_dest.to_string_lossy().ends_with('/') || local_dest.is_dir() {
+                            local_dest.clone()
+                        } else {
+                            // Destination doesn't exist - create it as target
+                            local_dest.clone()
+                        }
                     } else {
-                        // Destination doesn't exist or is a file path: use as the target dir name
-                        local_dest.clone()
+                        // No trailing slash: preserve directory name
+                        let dir_name = PathBuf::from(remote_path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "download".to_string());
+
+                        if local_dest.to_string_lossy().ends_with('/') {
+                            // Explicit directory destination: use as-is with dir name
+                            local_dest.join(&dir_name)
+                        } else if local_dest.is_dir() {
+                            // Existing directory: add the remote dir name
+                            local_dest.join(&dir_name)
+                        } else {
+                            // Destination doesn't exist or is a file path: use as the target dir name
+                            local_dest.clone()
+                        }
                     };
 
                     self.enumerate_remote_directory(pool, remote_path, &local_base)

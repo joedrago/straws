@@ -229,12 +229,17 @@ impl ProgressDisplay {
         let agent_jobs = self.tracker.agent_jobs();
 
         let indent = 4;
+        // Calculate how many cells fit per row: indent + (CELL_WIDTH * cols) <= term_width
         let available_width = term_width.saturating_sub(indent);
         let cols = std::cmp::max(1, available_width / CELL_WIDTH);
 
         for (i, agent) in agents.iter().enumerate() {
-            if i % cols == 0 && i > 0 {
-                let _ = execute!(stdout, Print("\n"));
+            // Print newline and indent for new rows
+            if i % cols == 0 {
+                if i > 0 {
+                    let _ = execute!(stdout, Print("\n"));
+                }
+                let _ = execute!(stdout, Print("    ")); // indent only at start of row
             }
 
             let state = agent.state();
@@ -260,7 +265,6 @@ impl ProgressDisplay {
 
             let _ = execute!(
                 stdout,
-                Print("    "),
                 SetForegroundColor(color),
                 Print(&cell),
                 ResetColor,
