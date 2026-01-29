@@ -138,10 +138,25 @@ def handle_truncate(path, size):
     except Exception as e:
         write_error(str(e))
 
-def handle_find(base_path):
+def compute_file_md5(fpath):
+    """Compute MD5 hash of a file, return 32-char hex string."""
+    import hashlib
+    h = hashlib.md5()
+    try:
+        with open(fpath, 'rb') as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except:
+        return '0' * 32  # Return zeros on error
+
+def handle_find(base_path, with_md5=False):
     """Recursively find all files and stream their stats.
     Response format: status(1) then streamed entries, each:
-      path_len(2) + path(utf8) + size(8) + mode(4) + mtime(8)
+      path_len(2) + path(utf8) + size(8) + mode(4) + mtime(8) [+ md5(32) if with_md5]
     Paths are returned relative to base_path (preserving the user's path format).
     Terminated by path_len=0.
     """
@@ -150,7 +165,7 @@ def handle_find(base_path):
         base = os.path.expanduser(base_path)
         sys.stdout.buffer.write(struct.pack('>B', 0))  # success status
 
-        def send_entry(rel_path, st):
+        def send_entry(rel_path, st, fpath):
             """Send entry with path relative to user-provided base_path"""
             # Combine user's original base_path with relative portion
             full_path = os.path.join(base_path, rel_path) if rel_path else base_path
@@ -158,10 +173,13 @@ def handle_find(base_path):
             sys.stdout.buffer.write(struct.pack('>H', len(path_bytes)))
             sys.stdout.buffer.write(path_bytes)
             sys.stdout.buffer.write(struct.pack('>QIQ', st.st_size, st.st_mode, int(st.st_mtime)))
+            if with_md5:
+                md5_hex = compute_file_md5(fpath)
+                sys.stdout.buffer.write(md5_hex.encode('ascii'))
 
         if os.path.isfile(base):
             # Single file - return with original base_path
-            send_entry('', os.stat(base))
+            send_entry('', os.stat(base), base)
         else:
             for root, dirs, filenames in os.walk(base):
                 for fname in filenames:
@@ -171,7 +189,7 @@ def handle_find(base_path):
                         if os.path.isfile(fpath):
                             # Get path relative to expanded base, then join with original base_path
                             rel = os.path.relpath(fpath, base)
-                            send_entry(rel, st)
+                            send_entry(rel, st, fpath)
                     except (OSError, IOError):
                         continue
 
@@ -230,7 +248,7 @@ def main():
         elif op == 5:  # TRUNCATE
             handle_truncate(path, length)
         elif op == 6:  # FIND
-            handle_find(path)
+            handle_find(path, offset != 0)  # offset=1 means compute MD5s
         else:
             write_error(f'Unknown operation: {op}')
 

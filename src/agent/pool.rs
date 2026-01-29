@@ -241,14 +241,15 @@ impl Agent {
 
     /// Send a find request and stream results via callback
     /// Callback receives each FindEntry; return false to stop enumeration
-    pub async fn find<F>(&self, path: &str, mut callback: F) -> Result<()>
+    /// If with_md5 is true, entries will include MD5 hashes
+    pub async fn find<F>(&self, path: &str, with_md5: bool, mut callback: F) -> Result<()>
     where
         F: FnMut(super::protocol::FindEntry) -> bool,
     {
         use super::protocol::FindEntry;
         use byteorder::{BigEndian, ByteOrder};
 
-        let req = Request::find(path);
+        let req = Request::find(path, with_md5);
         let encoded = req.encode();
 
         let mut stdin_guard = self.stdin.lock().await;
@@ -329,8 +330,8 @@ impl Agent {
                 break;
             }
 
-            // Read path + stats
-            let entry_size = path_len + 8 + 4 + 8; // path + size + mode + mtime
+            // Read path + stats (+ md5 if with_md5)
+            let entry_size = path_len + 8 + 4 + 8 + if with_md5 { 32 } else { 0 };
             let mut entry_buf = vec![0u8; entry_size];
             timeout(
                 Duration::from_secs(STALL_TIMEOUT_SECS),
@@ -346,12 +347,18 @@ impl Agent {
             let size = BigEndian::read_u64(&stats[0..8]);
             let mode = BigEndian::read_u32(&stats[8..12]);
             let mtime = BigEndian::read_u64(&stats[12..20]);
+            let md5 = if with_md5 {
+                Some(String::from_utf8_lossy(&stats[20..52]).to_string())
+            } else {
+                None
+            };
 
             let entry = FindEntry {
                 path: entry_path,
                 size,
                 mode,
                 mtime,
+                md5,
             };
 
             if !callback(entry) {
@@ -379,6 +386,7 @@ pub struct AgentPool {
     agents: Vec<Arc<Agent>>,
     config: Config,
     abort_flag: AtomicBool,
+    connected_count: AtomicU64,
 }
 
 impl AgentPool {
@@ -391,42 +399,61 @@ impl AgentPool {
             agents,
             config,
             abort_flag: AtomicBool::new(false),
+            connected_count: AtomicU64::new(0),
         }
     }
 
-    /// Start all agents with batched spawning
-    pub async fn start(&self) -> Result<()> {
-        let semaphore = Arc::new(Semaphore::new(BATCH_SIZE));
-        let mut handles = Vec::new();
+    /// Get number of agents that have successfully connected
+    pub fn connected_count(&self) -> usize {
+        self.connected_count.load(Ordering::Relaxed) as usize
+    }
 
-        for agent in &self.agents {
+    /// Start all agents with batched spawning
+    /// The progress_fn callback is called periodically with (connected, total)
+    pub async fn start<F>(&self, mut progress_fn: F) -> Result<()>
+    where
+        F: FnMut(usize, usize),
+    {
+        use tokio::sync::mpsc;
+
+        let semaphore = Arc::new(Semaphore::new(BATCH_SIZE));
+        let (tx, mut rx) = mpsc::channel::<bool>(self.agents.len());
+        let total = self.agents.len();
+
+        for (idx, agent) in self.agents.iter().enumerate() {
             let permit = semaphore.clone().acquire_owned().await.unwrap();
             let agent = Arc::clone(agent);
             let config = self.config.clone();
+            let tx = tx.clone();
 
-            let handle = tokio::spawn(async move {
+            tokio::spawn(async move {
                 let result = Self::start_agent(&agent, &config).await;
                 drop(permit);
-                if result.is_err() {
+                let success = result.is_ok();
+                if !success {
                     agent.mark_unhealthy("Failed to start");
                 }
-                result
+                let _ = tx.send(success).await;
             });
 
-            handles.push(handle);
-
             // Small delay between batch starts
-            if handles.len() % BATCH_SIZE == 0 {
+            if (idx + 1) % BATCH_SIZE == 0 {
                 tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
             }
         }
 
-        // Wait for all agents to start
+        // Drop our sender so rx will complete when all tasks are done
+        drop(tx);
+
+        // Wait for all agents, updating progress
         let mut success_count = 0;
-        for handle in handles {
-            if let Ok(Ok(())) = handle.await {
+
+        while let Some(success) = rx.recv().await {
+            if success {
                 success_count += 1;
+                self.connected_count.fetch_add(1, Ordering::Relaxed);
             }
+            progress_fn(success_count, total);
         }
 
         if success_count == 0 {

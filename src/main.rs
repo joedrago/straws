@@ -64,16 +64,18 @@ async fn run() -> Result<()> {
     let pool = Arc::new(AgentPool::new(config.clone()));
     debug_log!("Starting {} agents", config.tunnels);
 
-    // Start agents
-    eprint!("Connecting ({} tunnels)...", config.tunnels);
-    pool.start().await?;
+    // Start agents with progress updates
+    pool.start(|connected, total| {
+        eprint!("\rConnecting... {}/{} tunnels", connected, total);
+        let _ = std::io::Write::flush(&mut std::io::stderr());
+    }).await?;
 
     let healthy = pool.healthy_count();
     if healthy == 0 {
-        eprintln!(" failed");
+        eprintln!("\rConnecting... failed                    ");
         return Err(StrawsError::AllAgentsUnhealthy);
     }
-    eprintln!(" {} connected", healthy);
+    eprintln!("\rConnecting... {}/{} tunnels ready       ", healthy, config.tunnels);
     debug_log!("{} agents healthy", healthy);
 
     // Create job queue and scheduler
@@ -83,8 +85,11 @@ async fn run() -> Result<()> {
     // Create progress tracker
     let tracker = Arc::new(ProgressTracker::new(config.tunnels));
 
-    // Schedule jobs based on direction
-    eprint!("Scanning files...");
+    // Schedule jobs based on direction with progress display
+    let verify_note = if config.verify { " (with verification)" } else { "" };
+    eprint!("\rScanning{}: 0 files found", verify_note);
+    let _ = std::io::Write::flush(&mut std::io::stderr());
+
     match config.direction {
         Direction::Download => {
             scheduler.schedule_downloads(&pool).await?;
@@ -93,10 +98,19 @@ async fn run() -> Result<()> {
             scheduler.schedule_uploads(&pool).await?;
         }
     }
-    eprintln!(" {} files found", scheduler.total_files());
 
-    // Update tracker with totals
+    eprintln!("\rScanning{}: {} files found       ", verify_note, scheduler.total_files());
+
+    // Update tracker with totals and descriptions
     tracker.set_totals(scheduler.total_bytes(), scheduler.total_files());
+    tracker.set_verify_enabled(config.verify);
+
+    // Set source/destination descriptions for display
+    let source_desc = format!("{}:{}", config.remote.user_host(), config.remote.path);
+    let dest_desc = config.local_paths.first()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| ".".to_string());
+    tracker.set_descriptions(&source_desc, &dest_desc);
 
     if scheduler.total_files() == 0 {
         println!("No files to transfer");
@@ -330,10 +344,14 @@ async fn worker_loop(
             }
             Err(e) => {
                 debug_log!("Job {} failed: {}", job.id, e);
+                let file_name = job.file_meta.local_path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
 
                 // Check if agent failure
                 if e.is_agent_failure() {
                     agent.mark_unhealthy(&e.to_string());
+                    tracker.log_event(&format!("Agent error: {}", e), true);
                 } else {
                     pool.release(&agent);
                 }
@@ -343,16 +361,20 @@ async fn worker_loop(
                     let retries = job.increment_retry();
                     if retries < MAX_RETRIES {
                         debug_log!("Requeuing job {} (retry {})", job.id, retries);
+                        tracker.log_event(&format!("Retrying {}: {}", file_name, e), false);
                         // Requeue the job
                         if sender.try_send(job).is_err() {
                             debug_log!("Failed to requeue job, queue full or closed");
+                            tracker.log_event(&format!("Failed {}: queue full", file_name), true);
                             tracker.file_failed();
                         }
                     } else {
                         debug_log!("Job {} max retries exceeded", job.id);
+                        tracker.log_event(&format!("Failed {}: max retries", file_name), true);
                         tracker.file_failed();
                     }
                 } else {
+                    tracker.log_event(&format!("Failed {}: {}", file_name, e), true);
                     tracker.file_failed();
                 }
             }

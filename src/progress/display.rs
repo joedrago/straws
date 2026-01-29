@@ -19,6 +19,7 @@ use crate::agent::{AgentPool, AgentState};
 
 const RENDER_INTERVAL_MS: u64 = 250;
 const PROGRESS_BAR_WIDTH: usize = 40;
+const CELL_WIDTH: usize = 22;
 
 pub struct ProgressDisplay {
     tracker: Arc<ProgressTracker>,
@@ -69,6 +70,27 @@ impl ProgressDisplay {
         let (term_width, _) = terminal::size().unwrap_or((80, 24));
         let width = term_width as usize;
 
+        // Header: source → destination
+        let source = self.tracker.source_desc();
+        let dest = self.tracker.dest_desc();
+        if !source.is_empty() {
+            let _ = execute!(stdout, Print("\n"));
+            let _ = execute!(
+                stdout,
+                Print("  "),
+                SetForegroundColor(Color::Cyan),
+                Print(&source),
+                ResetColor,
+                SetForegroundColor(Color::DarkGrey),
+                Print(" → "),
+                ResetColor,
+                SetForegroundColor(Color::Green),
+                Print(&dest),
+                ResetColor,
+                Print("\n")
+            );
+        }
+
         // Progress bar
         let percent = self.tracker.progress_percent();
         let filled = ((percent / 100.0) * PROGRESS_BAR_WIDTH as f64) as usize;
@@ -84,25 +106,38 @@ impl ProgressDisplay {
 
         let eta_str = eta
             .map(|s| format_duration(s))
-            .unwrap_or_else(|| "--".to_string());
+            .unwrap_or_else(|| "--:--".to_string());
 
-        let progress_line = format!(
-            " {:5.1}% [{}] {}/{} {} ETA: {}",
-            percent,
-            bar,
-            format_bytes(transferred),
-            format_bytes(total),
-            format_speed(speed),
-            eta_str
-        );
-
-        // Print progress line
+        let _ = execute!(stdout, Print("\n"));
         let _ = execute!(
             stdout,
-            SetForegroundColor(Color::Cyan),
-            Print(&progress_line[..std::cmp::min(progress_line.len(), width)]),
+            Print("  "),
+            SetForegroundColor(Color::Green),
+            Print(&bar),
             ResetColor,
-            Print("\n\n")
+            Print(format!(" {:5.1}%\n", percent))
+        );
+
+        let _ = execute!(stdout, Print("\n"));
+        let _ = execute!(
+            stdout,
+            Print(format!("  Progress: {}/{}\n", format_bytes(transferred), format_bytes(total)))
+        );
+        let _ = execute!(
+            stdout,
+            Print("  Speed   : "),
+            SetForegroundColor(Color::Cyan),
+            Print(format_speed(speed)),
+            ResetColor,
+            Print("\n")
+        );
+        let _ = execute!(
+            stdout,
+            Print("  ETA     : "),
+            SetForegroundColor(Color::Yellow),
+            Print(&eta_str),
+            ResetColor,
+            Print("\n")
         );
 
         // File counts
@@ -110,78 +145,129 @@ impl ProgressDisplay {
         let total_files = self.tracker.total_files();
         let files_failed = self.tracker.files_failed();
 
-        let files_line = format!(
-            " Files: {}/{} completed",
-            files_completed, total_files
+        let _ = execute!(
+            stdout,
+            Print(format!("  Files   : {}/{}", files_completed, total_files))
         );
-        let _ = execute!(stdout, Print(&files_line));
 
         if files_failed > 0 {
             let _ = execute!(
                 stdout,
-                Print(", "),
+                Print(" ("),
                 SetForegroundColor(Color::Red),
                 Print(format!("{} failed", files_failed)),
-                ResetColor
+                ResetColor,
+                Print(")")
             );
         }
         let _ = execute!(stdout, Print("\n"));
 
-        // Tunnel status (if verbose)
-        if self.verbose {
-            let _ = execute!(stdout, Print("\n Tunnels:\n"));
+        // Tunnel grid (always show)
+        let _ = execute!(stdout, Print("\n"));
+        let _ = execute!(
+            stdout,
+            SetForegroundColor(Color::DarkGrey),
+            Print("  Agents:\n"),
+            ResetColor
+        );
 
-            let agents = self.pool.agents();
-            let agent_jobs = self.tracker.agent_jobs();
-            let cells_per_row = std::cmp::max(1, width / 25);
+        self.render_agent_grid(&mut stdout, width);
 
-            for (i, agent) in agents.iter().enumerate() {
-                let state = agent.state();
-                let (symbol, color) = match state {
-                    AgentState::Starting => ("○", Color::Yellow),
-                    AgentState::Ready => ("○", Color::DarkGrey),
-                    AgentState::Busy => ("●", Color::Green),
-                    AgentState::Unhealthy => ("✕", Color::Red),
-                };
-
-                let job_desc = agent_jobs
-                    .get(i)
-                    .and_then(|j| j.clone())
-                    .unwrap_or_else(|| "idle".to_string());
-
-                let cell = format!(" {}#{}: {}", symbol, i, truncate(&job_desc, 15));
-
-                let _ = execute!(
-                    stdout,
-                    SetForegroundColor(color),
-                    Print(&cell),
-                    ResetColor
-                );
-
-                if (i + 1) % cells_per_row == 0 {
-                    let _ = execute!(stdout, Print("\n"));
-                }
-            }
+        // Log events (errors, retries, etc.)
+        let log_events = self.tracker.log_events();
+        if !log_events.is_empty() {
             let _ = execute!(stdout, Print("\n"));
-        }
-
-        // Recent files
-        let recent = self.tracker.recent_files();
-        if !recent.is_empty() {
-            let _ = execute!(stdout, Print("\n Recent:\n"));
-            for file in recent.iter().rev().take(5) {
+            let _ = execute!(
+                stdout,
+                SetForegroundColor(Color::DarkGrey),
+                Print("  Log:\n"),
+                ResetColor
+            );
+            for event in log_events.iter().rev().take(5) {
+                let color = if event.is_error { Color::Red } else { Color::Yellow };
                 let _ = execute!(
                     stdout,
-                    SetForegroundColor(Color::Green),
-                    Print(" ✓ "),
+                    Print("    "),
+                    SetForegroundColor(color),
+                    Print(truncate(&event.message, width.saturating_sub(6))),
                     ResetColor,
-                    Print(truncate(file, width.saturating_sub(4))),
                     Print("\n")
                 );
             }
         }
 
+        // Recent files (if verbose)
+        if self.verbose {
+            let recent = self.tracker.recent_files();
+            if !recent.is_empty() {
+                let _ = execute!(stdout, Print("\n"));
+                let _ = execute!(
+                    stdout,
+                    SetForegroundColor(Color::DarkGrey),
+                    Print("  Recent:\n"),
+                    ResetColor
+                );
+                for file in recent.iter().rev().take(5) {
+                    let _ = execute!(
+                        stdout,
+                        Print("    "),
+                        SetForegroundColor(Color::Green),
+                        Print("✓ "),
+                        ResetColor,
+                        Print(truncate(file, width.saturating_sub(6))),
+                        Print("\n")
+                    );
+                }
+            }
+        }
+
         let _ = stdout.flush();
+    }
+
+    fn render_agent_grid(&self, stdout: &mut io::Stdout, term_width: usize) {
+        let agents = self.pool.agents();
+        let agent_jobs = self.tracker.agent_jobs();
+
+        let indent = 4;
+        let available_width = term_width.saturating_sub(indent);
+        let cols = std::cmp::max(1, available_width / CELL_WIDTH);
+
+        for (i, agent) in agents.iter().enumerate() {
+            if i % cols == 0 && i > 0 {
+                let _ = execute!(stdout, Print("\n"));
+            }
+
+            let state = agent.state();
+            let (symbol, color) = match state {
+                AgentState::Starting => ("○", Color::Yellow),
+                AgentState::Ready => ("○", Color::DarkGrey),
+                AgentState::Busy => ("●", Color::Green),
+                AgentState::Unhealthy => ("✕", Color::Red),
+            };
+
+            let job_desc = agent_jobs
+                .get(i)
+                .and_then(|j| j.clone())
+                .unwrap_or_else(|| "-".to_string());
+
+            // Format: "●00:filename.ext" with fixed width
+            let id_str = format!("{:02}", i);
+            let max_name_len = CELL_WIDTH.saturating_sub(5); // symbol + id(2) + colon + spacing
+            let name = truncate(&job_desc, max_name_len);
+
+            let cell = format!("{}{}:{}", symbol, id_str, name);
+            let padding = CELL_WIDTH.saturating_sub(visible_len(&cell));
+
+            let _ = execute!(
+                stdout,
+                Print("    "),
+                SetForegroundColor(color),
+                Print(&cell),
+                ResetColor,
+                Print(" ".repeat(padding))
+            );
+        }
+        let _ = execute!(stdout, Print("\n"));
     }
 
     /// Print final summary
@@ -193,6 +279,7 @@ impl ProgressDisplay {
         let transferred = self.tracker.bytes_transferred();
         let files_completed = self.tracker.files_completed();
         let files_failed = self.tracker.files_failed();
+        let files_verified = self.tracker.files_verified();
 
         let avg_speed = if elapsed > 0 {
             transferred as f64 / elapsed as f64
@@ -200,21 +287,49 @@ impl ProgressDisplay {
             0.0
         };
 
-        println!("\n Transfer complete!");
-        println!(
-            " {} transferred in {}",
-            format_bytes(transferred),
-            format_duration(elapsed)
+        let _ = execute!(
+            stdout,
+            SetForegroundColor(Color::Green),
+            Print("✓"),
+            ResetColor,
+            Print(format!(
+                " Transfer complete: {} in {}\n",
+                format_bytes(transferred),
+                format_duration(elapsed)
+            ))
         );
-        println!(" Average speed: {}", format_speed(avg_speed));
-        println!(" Files: {} completed", files_completed);
+
+        let _ = execute!(
+            stdout,
+            SetForegroundColor(Color::DarkGrey),
+            Print(format!("  Average speed: {}\n", format_speed(avg_speed))),
+            ResetColor
+        );
+
+        if files_completed > 1 {
+            let _ = execute!(
+                stdout,
+                SetForegroundColor(Color::DarkGrey),
+                Print(format!("  Files: {}\n", files_completed)),
+                ResetColor
+            );
+        }
+
+        if self.tracker.verify_enabled() {
+            let _ = execute!(
+                stdout,
+                SetForegroundColor(Color::DarkGrey),
+                Print(format!("  Verified: {} files\n", files_verified)),
+                ResetColor
+            );
+        }
 
         if files_failed > 0 {
             let _ = execute!(
                 stdout,
-                Print(" "),
+                Print("  "),
                 SetForegroundColor(Color::Red),
-                Print(format!("{} failed\n", files_failed)),
+                Print(format!("Failed: {}\n", files_failed)),
                 ResetColor
             );
         }
@@ -232,4 +347,11 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len - 3])
     }
+}
+
+/// Get visible length of string (ignoring ANSI codes)
+fn visible_len(s: &str) -> usize {
+    // Simple implementation - just count non-ANSI chars
+    // This works because our strings don't have ANSI codes at this point
+    s.chars().count()
 }

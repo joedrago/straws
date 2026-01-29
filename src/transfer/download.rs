@@ -126,3 +126,13 @@ async fn compute_local_md5(path: &std::path::Path, offset: u64, length: u64) -> 
 
     Ok(format!("{:x}", hasher.finalize()))
 }
+
+/// Compute MD5 of an entire file
+pub async fn compute_file_md5(path: &std::path::Path) -> Result<String> {
+    let file_size = tokio::fs::metadata(path)
+        .await
+        .map_err(|e| StrawsError::Io(e))?
+        .len();
+
+    compute_local_md5(path, 0, file_size).await
+}

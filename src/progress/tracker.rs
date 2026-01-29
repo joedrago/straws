@@ -1,12 +1,19 @@
 // Copyright (c) 2025, Joe Drago <joedrago@gmail.com>
 // SPDX-License-Identifier: BSD-2-Clause
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use parking_lot::Mutex;
 
 use super::speed::SpeedTracker;
+
+/// A log event for display
+#[derive(Clone)]
+pub struct LogEvent {
+    pub message: String,
+    pub is_error: bool,
+}
 
 /// Thread-safe progress tracking
 pub struct ProgressTracker {
@@ -15,10 +22,15 @@ pub struct ProgressTracker {
     total_files: AtomicU64,
     files_completed: AtomicU64,
     files_failed: AtomicU64,
+    files_verified: AtomicU64,
     speed_tracker: Mutex<SpeedTracker>,
     start_time: Instant,
     recent_files: Mutex<Vec<String>>,
     agent_jobs: Mutex<Vec<Option<String>>>, // Current job description per agent
+    log_events: Mutex<Vec<LogEvent>>,
+    verify_enabled: AtomicBool,
+    source_desc: Mutex<String>,
+    dest_desc: Mutex<String>,
 }
 
 impl ProgressTracker {
@@ -29,16 +41,66 @@ impl ProgressTracker {
             total_files: AtomicU64::new(0),
             files_completed: AtomicU64::new(0),
             files_failed: AtomicU64::new(0),
+            files_verified: AtomicU64::new(0),
             speed_tracker: Mutex::new(SpeedTracker::new()),
             start_time: Instant::now(),
             recent_files: Mutex::new(Vec::new()),
             agent_jobs: Mutex::new(vec![None; tunnel_count]),
+            log_events: Mutex::new(Vec::new()),
+            verify_enabled: AtomicBool::new(false),
+            source_desc: Mutex::new(String::new()),
+            dest_desc: Mutex::new(String::new()),
         }
     }
 
     pub fn set_totals(&self, bytes: u64, files: u64) {
         self.total_bytes.store(bytes, Ordering::Relaxed);
         self.total_files.store(files, Ordering::Relaxed);
+    }
+
+    pub fn set_descriptions(&self, source: &str, dest: &str) {
+        *self.source_desc.lock() = source.to_string();
+        *self.dest_desc.lock() = dest.to_string();
+    }
+
+    pub fn set_verify_enabled(&self, enabled: bool) {
+        self.verify_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn verify_enabled(&self) -> bool {
+        self.verify_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn source_desc(&self) -> String {
+        self.source_desc.lock().clone()
+    }
+
+    pub fn dest_desc(&self) -> String {
+        self.dest_desc.lock().clone()
+    }
+
+    pub fn log_event(&self, message: &str, is_error: bool) {
+        let mut events = self.log_events.lock();
+        events.push(LogEvent {
+            message: message.to_string(),
+            is_error,
+        });
+        // Keep last 5 events
+        while events.len() > 5 {
+            events.remove(0);
+        }
+    }
+
+    pub fn log_events(&self) -> Vec<LogEvent> {
+        self.log_events.lock().clone()
+    }
+
+    pub fn file_verified(&self) {
+        self.files_verified.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn files_verified(&self) -> u64 {
+        self.files_verified.load(Ordering::Relaxed)
     }
 
     pub fn add_bytes(&self, bytes: u64) {

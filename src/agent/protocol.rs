@@ -104,11 +104,11 @@ impl Request {
         }
     }
 
-    pub fn find(path: impl Into<String>) -> Self {
+    pub fn find(path: impl Into<String>, with_md5: bool) -> Self {
         Request {
             op: OpCode::Find,
             path: path.into(),
-            offset: 0,
+            offset: if with_md5 { 1 } else { 0 }, // Use offset as flags: 1 = compute MD5
             length: 0,
             data: None,
         }
@@ -246,6 +246,7 @@ pub struct FindEntry {
     pub size: u64,
     pub mode: u32,
     pub mtime: u64,
+    pub md5: Option<String>, // Present when find was called with_md5=true
 }
 
 impl FindEntry {
@@ -288,7 +289,7 @@ impl FindEntry {
             StrawsError::Protocol(format!("Failed to read mtime: {}", e))
         })?;
 
-        Ok((Some(FindEntry { path, size, mode, mtime }), needed))
+        Ok((Some(FindEntry { path, size, mode, mtime, md5: None }), needed))
     }
 }
 

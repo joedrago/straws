@@ -9,6 +9,7 @@ use crate::agent::AgentPool;
 use crate::config::Config;
 use crate::debug_log;
 use crate::error::{Result, StrawsError};
+use crate::transfer::download::compute_file_md5;
 
 /// Schedules jobs based on file enumeration
 pub struct JobScheduler {
@@ -117,7 +118,20 @@ impl JobScheduler {
                         local_dest.clone()
                     };
 
-                    self.create_download_jobs(remote_path, &local_path, stat, pool.agents().len())
+                    // For single files, get MD5 if verify is enabled
+                    let remote_md5 = if self.config.verify {
+                        let md5_response = pool.acquire()
+                            .ok_or(StrawsError::AllAgentsUnhealthy)?;
+                        let result = md5_response.request(&Request::md5(remote_path, 0, stat.size)).await;
+                        pool.release(&md5_response);
+                        result.ok()
+                            .filter(|r| r.is_success())
+                            .map(|r| String::from_utf8_lossy(&r.data).to_string())
+                    } else {
+                        None
+                    };
+
+                    self.create_download_jobs(pool, remote_path, &local_path, stat, remote_md5.as_deref(), pool.agents().len())
                         .await?;
                 }
             }
@@ -152,10 +166,11 @@ impl JobScheduler {
         let local_base = local_base.clone();
 
         // Collect entries to process (we need to release agent before creating jobs)
+        // Request MD5 hashes if verify is enabled
         let mut entries = Vec::new();
 
         agent
-            .find(remote_dir, |entry| {
+            .find(remote_dir, self.config.verify, |entry| {
                 if pool.is_aborted() {
                     return false;
                 }
@@ -184,7 +199,7 @@ impl JobScheduler {
                 mode: entry.mode,
                 mtime: entry.mtime,
             };
-            self.create_download_jobs(&entry.path, &local_path, stat, tunnel_count)
+            self.create_download_jobs(pool, &entry.path, &local_path, stat, entry.md5.as_deref(), tunnel_count)
                 .await?;
         }
 
@@ -193,19 +208,60 @@ impl JobScheduler {
 
     async fn create_download_jobs(
         &self,
+        _pool: &AgentPool,
         remote_path: &str,
         local_path: &PathBuf,
         stat: StatInfo,
+        remote_md5: Option<&str>,
         tunnel_count: usize,
     ) -> Result<()> {
         // Check if file already exists and is complete
         if let Ok(local_meta) = tokio::fs::metadata(local_path).await {
             if local_meta.len() == stat.size {
-                debug_log!(
-                    "Skipping existing file: {} (size matches)",
-                    local_path.display()
-                );
-                return Ok(());
+                // If verify is enabled and we have remote MD5, check it
+                if self.config.verify {
+                    if let Some(expected_md5) = remote_md5 {
+                        debug_log!("Verifying existing file: {}", local_path.display());
+
+                        // Compute local MD5
+                        let local_md5 = match compute_file_md5(local_path).await {
+                            Ok(md5) => md5,
+                            Err(e) => {
+                                debug_log!("Failed to compute local MD5: {}, will redownload", e);
+                                String::new()
+                            }
+                        };
+
+                        if !local_md5.is_empty() && local_md5 == expected_md5 {
+                            debug_log!(
+                                "Skipping verified file: {} (MD5 matches)",
+                                local_path.display()
+                            );
+                            return Ok(());
+                        } else if !local_md5.is_empty() {
+                            debug_log!(
+                                "MD5 mismatch for {}: local={} remote={}, will redownload",
+                                local_path.display(),
+                                local_md5,
+                                expected_md5
+                            );
+                        }
+                        // Fall through to download the file
+                    } else {
+                        // No remote MD5 available, skip by size only
+                        debug_log!(
+                            "Skipping existing file: {} (size matches, no MD5 available)",
+                            local_path.display()
+                        );
+                        return Ok(());
+                    }
+                } else {
+                    debug_log!(
+                        "Skipping existing file: {} (size matches)",
+                        local_path.display()
+                    );
+                    return Ok(());
+                }
             }
         }
 
