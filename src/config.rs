@@ -47,7 +47,7 @@ pub struct Args {
     pub compress: bool,
 
     /// Chunk size for large files (supports K, M, G suffixes)
-    #[arg(long = "chunk-size", default_value = "16M", value_parser = parse_size)]
+    #[arg(long = "chunk-size", default_value = "50M", value_parser = parse_size)]
     pub chunk_size: u64,
 
     /// Enable MD5 verification

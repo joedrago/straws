@@ -81,7 +81,7 @@ By default, straws uses SSH key-based authentication. If you need password authe
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--chunk-size <SIZE>` | 16M | Size threshold for splitting large files across multiple connections. Supports suffixes: `K` (kilobytes), `M` (megabytes), `G` (gigabytes). |
+| `--chunk-size <SIZE>` | 50M | Size threshold for splitting large files across multiple connections. Supports suffixes: `K` (kilobytes), `M` (megabytes), `G` (gigabytes). |
 | `--verify` | off | Compute and compare MD5 checksums after transfer to verify data integrity. |
 
 #### Display Options
