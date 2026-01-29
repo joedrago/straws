@@ -218,6 +218,16 @@ straws is optimized for **raw transfer speed** when you need to move large amoun
 - Check SSH key permissions: `chmod 600 ~/.ssh/id_rsa`
 - Try with debug logging: `--debug-log debug.txt`
 
+### "Too many open files" with high tunnel counts
+
+Each SSH tunnel uses several file descriptors on both the local and remote hosts. With high tunnel counts (e.g., 50+), you may hit the default file descriptor limit (`ulimit -n`), especially on the remote server.
+
+To check your limit: `ulimit -n` (common defaults: 256 on macOS, 1024 on Linux)
+
+To increase temporarily: `ulimit -n 4096`
+
+For most use cases, 16-32 tunnels provides excellent throughput without hitting limits.
+
 ### "Python not found" on remote
 
 The remote host needs Python 3 available as `python3`. Install it with your package manager:

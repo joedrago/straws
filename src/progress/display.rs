@@ -292,7 +292,7 @@ impl ProgressDisplay {
     /// Print final summary
     pub fn print_summary(&self) {
         let mut stdout = io::stdout();
-        let _ = execute!(stdout, Clear(ClearType::All), MoveTo(0, 0), Show);
+        let _ = execute!(stdout, Show, Print("\n\n"));
 
         let elapsed = self.tracker.elapsed_secs();
         let transferred = self.tracker.bytes_transferred();
