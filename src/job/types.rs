@@ -218,12 +218,17 @@ impl Job {
             .unwrap_or_else(|| "unknown".to_string());
 
         match self.chunk_index {
-            Some(idx) => format!(
-                "[{}/{}] {}",
-                idx + 1,
-                self.file_meta.total_chunks,
-                file_name
-            ),
+            Some(idx) => {
+                let total = self.file_meta.total_chunks;
+                let width = total.to_string().len();
+                format!(
+                    "[{:0>width$}/{}] {}",
+                    idx + 1,
+                    total,
+                    file_name,
+                    width = width
+                )
+            }
             None => file_name,
         }
     }
