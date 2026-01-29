@@ -208,13 +208,18 @@ impl ProgressDisplay {
                     ResetColor
                 );
                 for file in recent.iter().rev().take(5) {
+                    let display_str = if let (Some(local), Some(remote)) = (&file.local_md5, &file.remote_md5) {
+                        format!("{} ({} = {})", file.name, local, remote)
+                    } else {
+                        file.name.clone()
+                    };
                     let _ = execute!(
                         stdout,
                         Print("    "),
                         SetForegroundColor(Color::Green),
                         Print("✓ "),
                         ResetColor,
-                        Print(truncate(file, width.saturating_sub(6))),
+                        Print(truncate(&display_str, width.saturating_sub(6))),
                         Print("\n")
                     );
                 }
@@ -283,7 +288,7 @@ impl ProgressDisplay {
         let transferred = self.tracker.bytes_transferred();
         let files_completed = self.tracker.files_completed();
         let files_failed = self.tracker.files_failed();
-        let files_verified = self.tracker.files_verified();
+        let files_skipped = self.tracker.files_skipped();
 
         let avg_speed = if elapsed > 0 {
             transferred as f64 / elapsed as f64
@@ -319,11 +324,11 @@ impl ProgressDisplay {
             );
         }
 
-        if self.tracker.verify_enabled() {
+        if files_skipped > 0 {
             let _ = execute!(
                 stdout,
                 SetForegroundColor(Color::DarkGrey),
-                Print(format!("  Verified: {} files\n", files_verified)),
+                Print(format!("  Skipped (already complete): {}\n", files_skipped)),
                 ResetColor
             );
         }

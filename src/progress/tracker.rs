@@ -15,6 +15,14 @@ pub struct LogEvent {
     pub is_error: bool,
 }
 
+/// A completed file with optional verification info
+#[derive(Clone)]
+pub struct CompletedFile {
+    pub name: String,
+    pub local_md5: Option<String>,
+    pub remote_md5: Option<String>,
+}
+
 /// Thread-safe progress tracking
 pub struct ProgressTracker {
     total_bytes: AtomicU64,
@@ -22,10 +30,10 @@ pub struct ProgressTracker {
     total_files: AtomicU64,
     files_completed: AtomicU64,
     files_failed: AtomicU64,
-    files_verified: AtomicU64,
+    files_skipped: AtomicU64,
     speed_tracker: Mutex<SpeedTracker>,
     start_time: Instant,
-    recent_files: Mutex<Vec<String>>,
+    recent_files: Mutex<Vec<CompletedFile>>,
     agent_jobs: Mutex<Vec<Option<String>>>, // Current job description per agent
     log_events: Mutex<Vec<LogEvent>>,
     verify_enabled: AtomicBool,
@@ -41,7 +49,7 @@ impl ProgressTracker {
             total_files: AtomicU64::new(0),
             files_completed: AtomicU64::new(0),
             files_failed: AtomicU64::new(0),
-            files_verified: AtomicU64::new(0),
+            files_skipped: AtomicU64::new(0),
             speed_tracker: Mutex::new(SpeedTracker::new()),
             start_time: Instant::now(),
             recent_files: Mutex::new(Vec::new()),
@@ -95,12 +103,16 @@ impl ProgressTracker {
         self.log_events.lock().clone()
     }
 
-    pub fn file_verified(&self) {
-        self.files_verified.fetch_add(1, Ordering::Relaxed);
+    pub fn file_skipped(&self) {
+        self.files_skipped.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn files_verified(&self) -> u64 {
-        self.files_verified.load(Ordering::Relaxed)
+    pub fn set_files_skipped(&self, count: u64) {
+        self.files_skipped.store(count, Ordering::Relaxed);
+    }
+
+    pub fn files_skipped(&self) -> u64 {
+        self.files_skipped.load(Ordering::Relaxed)
     }
 
     pub fn add_bytes(&self, bytes: u64) {
@@ -108,11 +120,15 @@ impl ProgressTracker {
         self.speed_tracker.lock().add_bytes(bytes);
     }
 
-    pub fn file_completed(&self, name: &str) {
+    pub fn file_completed(&self, name: &str, local_md5: Option<String>, remote_md5: Option<String>) {
         self.files_completed.fetch_add(1, Ordering::Relaxed);
 
         let mut recent = self.recent_files.lock();
-        recent.push(name.to_string());
+        recent.push(CompletedFile {
+            name: name.to_string(),
+            local_md5,
+            remote_md5,
+        });
         if recent.len() > 5 {
             recent.remove(0);
         }
@@ -179,7 +195,7 @@ impl ProgressTracker {
         (self.bytes_transferred() as f64 / total as f64) * 100.0
     }
 
-    pub fn recent_files(&self) -> Vec<String> {
+    pub fn recent_files(&self) -> Vec<CompletedFile> {
         self.recent_files.lock().clone()
     }
 

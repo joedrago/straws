@@ -103,6 +103,7 @@ async fn run() -> Result<()> {
 
     // Update tracker with totals and descriptions
     tracker.set_totals(scheduler.total_bytes(), scheduler.total_files());
+    tracker.set_files_skipped(scheduler.files_skipped());
     tracker.set_verify_enabled(config.verify);
 
     // Set source/destination descriptions for display
@@ -113,7 +114,12 @@ async fn run() -> Result<()> {
     tracker.set_descriptions(&source_desc, &dest_desc);
 
     if scheduler.total_files() == 0 {
-        println!("No files to transfer");
+        let skipped = scheduler.files_skipped();
+        if skipped > 0 {
+            println!("No files to transfer ({} already complete)", skipped);
+        } else {
+            println!("No files to transfer");
+        }
         pool.shutdown().await;
         return Ok(());
     }
@@ -325,7 +331,9 @@ async fn worker_loop(
                                 .file_name()
                                 .map(|n| n.to_string_lossy().to_string())
                                 .unwrap_or_default();
-                            tracker.file_completed(&name);
+                            // For non-chunked files with verify, both MD5s match (already verified)
+                            let md5 = job_result.md5.clone();
+                            tracker.file_completed(&name, md5.clone(), md5);
                         }
                     } else {
                         let name = job
@@ -334,7 +342,9 @@ async fn worker_loop(
                             .file_name()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_default();
-                        tracker.file_completed(&name);
+                        // For non-chunked files with verify, both MD5s match (already verified)
+                        let md5 = job_result.md5.clone();
+                        tracker.file_completed(&name, md5.clone(), md5);
                     }
 
                     // Remove from active files

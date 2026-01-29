@@ -80,6 +80,13 @@ pub async fn download_job(job: &Arc<Job>, agent: &Arc<Agent>) -> Result<JobResul
             });
         }
 
+        debug_log!(
+            "Verified {} ({} = {})",
+            job.file_meta.remote_path,
+            local_md5,
+            remote_md5
+        );
+
         Some(local_md5)
     } else {
         None

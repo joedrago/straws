@@ -18,6 +18,7 @@ pub struct JobScheduler {
     job_id_counter: AtomicU64,
     total_bytes: AtomicU64,
     total_files: AtomicU64,
+    files_skipped: AtomicU64,
 }
 
 impl JobScheduler {
@@ -28,6 +29,7 @@ impl JobScheduler {
             job_id_counter: AtomicU64::new(0),
             total_bytes: AtomicU64::new(0),
             total_files: AtomicU64::new(0),
+            files_skipped: AtomicU64::new(0),
         }
     }
 
@@ -41,6 +43,10 @@ impl JobScheduler {
 
     pub fn total_files(&self) -> u64 {
         self.total_files.load(Ordering::Relaxed)
+    }
+
+    pub fn files_skipped(&self) -> u64 {
+        self.files_skipped.load(Ordering::Relaxed)
     }
 
     /// Enumerate files and create jobs for download
@@ -252,6 +258,7 @@ impl JobScheduler {
                                 "Skipping verified file: {} (MD5 matches)",
                                 local_path.display()
                             );
+                            self.files_skipped.fetch_add(1, Ordering::Relaxed);
                             return Ok(());
                         } else if !local_md5.is_empty() {
                             debug_log!(
@@ -268,6 +275,7 @@ impl JobScheduler {
                             "Skipping existing file: {} (size matches, no MD5 available)",
                             local_path.display()
                         );
+                        self.files_skipped.fetch_add(1, Ordering::Relaxed);
                         return Ok(());
                     }
                 } else {
@@ -275,6 +283,7 @@ impl JobScheduler {
                         "Skipping existing file: {} (size matches)",
                         local_path.display()
                     );
+                    self.files_skipped.fetch_add(1, Ordering::Relaxed);
                     return Ok(());
                 }
             }
