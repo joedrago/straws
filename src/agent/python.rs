@@ -164,6 +164,7 @@ def handle_find(base_path, with_md5=False):
         # Expand ~ but keep the path format for consistent prefix stripping on client
         base = os.path.expanduser(base_path)
         sys.stdout.buffer.write(struct.pack('>B', 0))  # success status
+        sys.stdout.buffer.flush()
 
         def send_entry(rel_path, st, fpath):
             """Send entry with path relative to user-provided base_path"""
@@ -176,6 +177,7 @@ def handle_find(base_path, with_md5=False):
             if with_md5:
                 md5_hex = compute_file_md5(fpath)
                 sys.stdout.buffer.write(md5_hex.encode('ascii'))
+            sys.stdout.buffer.flush()  # Flush after each entry to stream data incrementally
 
         if os.path.isfile(base):
             # Single file - return with original base_path
