@@ -83,7 +83,24 @@ impl JobScheduler {
                 let is_dir = (stat.mode & 0o170000) == 0o040000;
 
                 if is_dir {
-                    self.enumerate_remote_directory(pool, remote_path, local_dest)
+                    // Preserve directory name: server:foo → ./foo/
+                    let dir_name = PathBuf::from(remote_path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "download".to_string());
+
+                    let local_base = if local_dest.to_string_lossy().ends_with('/') {
+                        // Explicit directory destination: use as-is with dir name
+                        local_dest.join(&dir_name)
+                    } else if local_dest.is_dir() {
+                        // Existing directory: add the remote dir name
+                        local_dest.join(&dir_name)
+                    } else {
+                        // Destination doesn't exist or is a file path: use as the target dir name
+                        local_dest.clone()
+                    };
+
+                    self.enumerate_remote_directory(pool, remote_path, &local_base)
                         .await?;
                 } else {
                     // Single file
