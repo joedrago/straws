@@ -22,9 +22,11 @@ A single SSH connection can feel like dousing a fire with a straw when you reall
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/straws.git
+git clone https://github.com/joedrago/straws.git
 cd straws
 cargo build --release
+
+# optional -- get the executable in your PATH somehow
 ln -sf `pwd`/target/release/straws ~/bin/straws
 ```
 
