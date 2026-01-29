@@ -147,13 +147,19 @@ impl Agent {
     }
 
     /// Send a read request and stream data to a writer
-    pub async fn stream_read<W: tokio::io::AsyncWrite + Unpin>(
+    /// If on_progress is provided, it will be called with each chunk's byte count
+    pub async fn stream_read<W, F>(
         &self,
         path: &str,
         offset: u64,
         length: u64,
         writer: &mut W,
-    ) -> Result<u64> {
+        mut on_progress: Option<F>,
+    ) -> Result<u64>
+    where
+        W: tokio::io::AsyncWrite + Unpin,
+        F: FnMut(u64),
+    {
         let req = Request::read(path, offset, length);
         let encoded = req.encode();
 
@@ -232,6 +238,11 @@ impl Agent {
             remaining -= to_read as u64;
             total_written += to_read as u64;
             self.add_bytes(to_read as u64);
+
+            // Report progress if callback provided
+            if let Some(ref mut cb) = on_progress {
+                cb(to_read as u64);
+            }
         }
 
         writer.flush().await.map_err(|e| StrawsError::Io(e))?;

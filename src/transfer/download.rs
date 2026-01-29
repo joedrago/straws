@@ -12,11 +12,16 @@ use crate::agent::Agent;
 use crate::debug_log;
 use crate::error::{Result, StrawsError};
 use crate::job::types::{Job, JobResult};
+use crate::progress::tracker::ProgressTracker;
 
 const IO_BUFFER_SIZE: usize = 65536; // 64KB
 
 /// Execute a download job
-pub async fn download_job(job: &Arc<Job>, agent: &Arc<Agent>) -> Result<JobResult> {
+pub async fn download_job(
+    job: &Arc<Job>,
+    agent: &Arc<Agent>,
+    tracker: &Arc<ProgressTracker>,
+) -> Result<JobResult> {
     let temp_path = job.file_meta.temp_path();
 
     // Ensure file is preallocated (only first chunk does the work, others wait/get cached result)
@@ -28,13 +33,17 @@ pub async fn download_job(job: &Arc<Job>, agent: &Arc<Agent>) -> Result<JobResul
     let file = open_write_at(&temp_path, job.offset).await?;
     let mut writer = BufWriter::with_capacity(IO_BUFFER_SIZE, file);
 
-    // Download data from remote
+    // Download data from remote, reporting progress incrementally
+    let tracker_clone = Arc::clone(tracker);
     let bytes_written = agent
         .stream_read(
             &job.file_meta.remote_path,
             job.offset,
             job.length,
             &mut writer,
+            Some(move |bytes: u64| {
+                tracker_clone.add_bytes(bytes);
+            }),
         )
         .await?;
 

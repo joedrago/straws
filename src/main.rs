@@ -319,19 +319,18 @@ async fn worker_loop(
         // Update tracker with job info
         tracker.set_agent_job(agent.id, Some(job.description()));
 
-        // Execute job
+        // Execute job (tracker is updated incrementally during transfer)
         let result = match job.direction {
-            JobDirection::Download => download_job(&job, &agent).await,
-            JobDirection::Upload => upload_job(&job, &agent).await,
+            JobDirection::Download => download_job(&job, &agent, &tracker).await,
+            JobDirection::Upload => upload_job(&job, &agent, &tracker).await,
         };
 
         // Clear job info
         tracker.set_agent_job(agent.id, None);
 
-        // Handle result
+        // Handle result (bytes already reported incrementally during transfer)
         match result {
             Ok(job_result) => {
-                tracker.add_bytes(job_result.bytes_transferred);
                 pool.release(&agent);
 
                 // Check if file complete

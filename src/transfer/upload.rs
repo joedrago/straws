@@ -12,11 +12,16 @@ use crate::agent::Agent;
 use crate::debug_log;
 use crate::error::{Result, StrawsError};
 use crate::job::types::{Job, JobResult};
+use crate::progress::tracker::ProgressTracker;
 
 const IO_BUFFER_SIZE: usize = 65536; // 64KB
 
 /// Execute an upload job
-pub async fn upload_job(job: &Arc<Job>, agent: &Arc<Agent>) -> Result<JobResult> {
+pub async fn upload_job(
+    job: &Arc<Job>,
+    agent: &Arc<Agent>,
+    tracker: &Arc<ProgressTracker>,
+) -> Result<JobResult> {
     let local_path = &job.file_meta.local_path;
 
     // For chunked files, preallocate/truncate on first chunk
@@ -82,6 +87,7 @@ pub async fn upload_job(job: &Arc<Job>, agent: &Arc<Agent>) -> Result<JobResult>
         current_offset += n as u64;
         total_written += n as u64;
         job.file_meta.add_bytes(n as u64);
+        tracker.add_bytes(n as u64);
     }
 
     // Mark chunk complete

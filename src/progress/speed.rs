@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 /// Rolling window speed calculator
-/// Uses 20 buckets x 50ms = 1 second window for responsive speed updates
+/// Uses 50 buckets x 100ms = 5 second window
 pub struct SpeedTracker {
     buckets: Vec<u64>,
     bucket_count: usize,
@@ -16,11 +16,11 @@ pub struct SpeedTracker {
 
 impl SpeedTracker {
     pub fn new() -> Self {
-        let bucket_count = 20;
+        let bucket_count = 50;
         SpeedTracker {
             buckets: vec![0; bucket_count],
             bucket_count,
-            bucket_duration_ms: 50,
+            bucket_duration_ms: 100,
             current_bucket: 0,
             last_update: Instant::now(),
             total_bytes: 0,
