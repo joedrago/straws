@@ -2,6 +2,10 @@
 
 A high-performance SSH file transfer tool that uses multiple parallel connections to maximize throughput.
 
+### Why "straws"?
+
+A single SSH connection can feel like dousing a fire with a straw when you really want a firehose. The solution? More straws. Lots and lots of straws.
+
 ## Features
 
 - **Parallel transfers** - Uses multiple simultaneous SSH connections to saturate your bandwidth
