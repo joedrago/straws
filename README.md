@@ -21,7 +21,7 @@ A high-performance SSH file transfer tool that uses multiple parallel connection
 git clone https://github.com/yourusername/straws.git
 cd straws
 cargo build --release
-# Binary is at ./target/release/straws
+ln -sf `pwd`/target/release/straws ~/bin/straws
 ```
 
 ## Quick Start
