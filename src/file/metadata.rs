@@ -7,12 +7,19 @@ use std::time::{Duration, UNIX_EPOCH};
 use crate::error::{Result, StrawsError};
 
 /// Set file mode (permissions)
+#[cfg(unix)]
 pub fn set_mode(path: &Path, mode: u32) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let permissions = std::fs::Permissions::from_mode(mode);
     std::fs::set_permissions(path, permissions).map_err(|e| StrawsError::Io(e))?;
 
+    Ok(())
+}
+
+/// Set file mode (permissions) - no-op on Windows (Unix permissions don't apply)
+#[cfg(not(unix))]
+pub fn set_mode(_path: &Path, _mode: u32) -> Result<()> {
     Ok(())
 }
 

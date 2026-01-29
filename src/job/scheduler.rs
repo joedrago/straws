@@ -475,10 +475,15 @@ impl JobScheduler {
         metadata: &std::fs::Metadata,
         tunnel_count: usize,
     ) -> Result<()> {
-        use std::os::unix::fs::MetadataExt;
-
         let size = metadata.len();
-        let mode = metadata.mode();
+
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::MetadataExt;
+            metadata.mode()
+        };
+        #[cfg(not(unix))]
+        let mode = 0o644u32; // Default permissions for files uploaded from Windows
         let mtime = metadata
             .modified()
             .ok()
