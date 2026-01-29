@@ -7,7 +7,7 @@ use md5::{Digest, Md5};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
 
-use super::io::{open_write_at, preallocate};
+use super::io::open_write_at;
 use crate::agent::Agent;
 use crate::debug_log;
 use crate::error::{Result, StrawsError};
@@ -19,12 +19,8 @@ const IO_BUFFER_SIZE: usize = 65536; // 64KB
 pub async fn download_job(job: &Arc<Job>, agent: &Arc<Agent>) -> Result<JobResult> {
     let temp_path = job.file_meta.temp_path();
 
-    // For chunked files, preallocate on first chunk
-    if job.chunk_index == Some(0) || job.chunk_index.is_none() {
-        if job.file_meta.size > 0 {
-            preallocate(&temp_path, job.file_meta.size).await?;
-        }
-    }
+    // Note: Preallocation is done during job scheduling, not here,
+    // to avoid race conditions between chunks of the same file.
 
     // Open temp file at correct offset
     let file = open_write_at(&temp_path, job.offset).await?;

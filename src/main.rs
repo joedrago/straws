@@ -65,12 +65,15 @@ async fn run() -> Result<()> {
     debug_log!("Starting {} agents", config.tunnels);
 
     // Start agents
+    eprint!("Connecting ({} tunnels)...", config.tunnels);
     pool.start().await?;
 
     let healthy = pool.healthy_count();
     if healthy == 0 {
+        eprintln!(" failed");
         return Err(StrawsError::AllAgentsUnhealthy);
     }
+    eprintln!(" {} connected", healthy);
     debug_log!("{} agents healthy", healthy);
 
     // Create job queue and scheduler
@@ -81,6 +84,7 @@ async fn run() -> Result<()> {
     let tracker = Arc::new(ProgressTracker::new(config.tunnels));
 
     // Schedule jobs based on direction
+    eprint!("Scanning files...");
     match config.direction {
         Direction::Download => {
             scheduler.schedule_downloads(&pool).await?;
@@ -89,6 +93,7 @@ async fn run() -> Result<()> {
             scheduler.schedule_uploads(&pool).await?;
         }
     }
+    eprintln!(" {} files found", scheduler.total_files());
 
     // Update tracker with totals
     tracker.set_totals(scheduler.total_bytes(), scheduler.total_files());
@@ -178,10 +183,20 @@ async fn run() -> Result<()> {
     // Cleanup on abort
     if abort_flag.load(Ordering::SeqCst) {
         debug_log!("Cleaning up after abort");
+        // Clean up active file transfers
         let files = active_files.lock();
         for (_, meta) in files.iter() {
             if !meta.is_complete() {
                 cleanup_temp(meta);
+            }
+        }
+        drop(files);
+
+        // Clean up any preallocated temp files from scheduling
+        for temp_path in scheduler.temp_files() {
+            if temp_path.exists() {
+                debug_log!("Removing preallocated temp file: {}", temp_path.display());
+                let _ = std::fs::remove_file(&temp_path);
             }
         }
     }
