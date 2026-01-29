@@ -14,7 +14,7 @@ use crate::error::{Result, StrawsError};
 use crate::job::types::{Job, JobResult};
 use crate::progress::tracker::ProgressTracker;
 
-const IO_BUFFER_SIZE: usize = 65536; // 64KB
+const IO_BUFFER_SIZE: usize = 524288; // 512KB
 
 /// Execute a download job
 pub async fn download_job(

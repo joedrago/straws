@@ -15,7 +15,7 @@ use crate::config::Config;
 use crate::debug_log;
 use crate::error::{Result, StrawsError};
 
-const IO_BUFFER_SIZE: usize = 65536; // 64KB
+const IO_BUFFER_SIZE: usize = 524288; // 512KB
 const STALL_TIMEOUT_SECS: u64 = 30;
 const INITIAL_PING_TIMEOUT_SECS: u64 = 10;
 const BATCH_SIZE: usize = 6;
