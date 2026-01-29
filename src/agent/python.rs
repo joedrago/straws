@@ -145,7 +145,7 @@ def handle_find(base_path):
     Terminated by path_len=0.
     """
     try:
-        base = os.path.abspath(base_path)
+        base = base_path  # Already expanded/resolved in main()
         sys.stdout.buffer.write(struct.pack('>B', 0))  # success status
 
         def send_entry(fpath, st):
@@ -193,6 +193,9 @@ def main():
         except UnicodeDecodeError:
             write_error('Invalid UTF-8 in path')
             continue
+
+        # Expand ~ and resolve relative paths
+        path = os.path.abspath(os.path.expanduser(path))
 
         # Read offset(8) + length(8)
         nums = read_exact(16)
