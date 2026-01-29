@@ -17,7 +17,7 @@ use super::speed::{format_bytes, format_duration, format_speed};
 use super::tracker::ProgressTracker;
 use crate::agent::{AgentPool, AgentState};
 
-const RENDER_INTERVAL_MS: u64 = 250;
+const RENDER_INTERVAL_MS: u64 = 50;
 const PROGRESS_BAR_WIDTH: usize = 40;
 const CELL_WIDTH: usize = 32;
 
