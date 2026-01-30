@@ -90,19 +90,26 @@ async fn run() -> Result<()> {
     eprint!("\rScanning{}: 0 files found", verify_note);
     let _ = std::io::Write::flush(&mut std::io::stderr());
 
-    // Spawn a task to update scanning progress
+    // Spawn a task to update scanning/scheduling progress
     let progress_task = tokio::spawn({
         let scheduler = Arc::clone(&scheduler);
         let verify_note = verify_note.to_string();
         async move {
-            let mut last_count = 0u64;
+            let mut last_files = 0u64;
+            let mut last_jobs = 0u64;
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                let count = scheduler.files_found();
-                if count != last_count {
-                    eprint!("\rScanning{}: {} files found", verify_note, count);
+                let files = scheduler.files_found();
+                let jobs = scheduler.jobs_scheduled();
+                if files != last_files || jobs != last_jobs {
+                    if jobs > 0 {
+                        eprint!("\rScanning{}: {} files found, {} jobs scheduled", verify_note, files, jobs);
+                    } else {
+                        eprint!("\rScanning{}: {} files found", verify_note, files);
+                    }
                     let _ = std::io::Write::flush(&mut std::io::stderr());
-                    last_count = count;
+                    last_files = files;
+                    last_jobs = jobs;
                 }
             }
         }
@@ -116,7 +123,13 @@ async fn run() -> Result<()> {
     progress_task.abort();
     schedule_result?;
 
-    eprintln!("\rScanning{}: {} files found       ", verify_note, scheduler.total_files());
+    let final_jobs = scheduler.jobs_scheduled();
+    if final_jobs > scheduler.total_files() {
+        // More jobs than files means chunking occurred
+        eprintln!("\rScanning{}: {} files, {} jobs scheduled       ", verify_note, scheduler.total_files(), final_jobs);
+    } else {
+        eprintln!("\rScanning{}: {} files found       ", verify_note, scheduler.total_files());
+    }
 
     // Update tracker with totals and descriptions
     tracker.set_totals(scheduler.total_bytes(), scheduler.total_files());

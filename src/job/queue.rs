@@ -3,13 +3,11 @@
 
 use std::sync::Arc;
 
-use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
+use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
 
 use super::types::Job;
 
-const DEFAULT_CAPACITY: usize = 10_000;
-
-/// Bounded job queue using crossbeam channel
+/// Unbounded job queue using crossbeam channel
 pub struct JobQueue {
     sender: Sender<Arc<Job>>,
     receiver: Receiver<Arc<Job>>,
@@ -17,20 +15,16 @@ pub struct JobQueue {
 
 impl JobQueue {
     pub fn new() -> Self {
-        Self::with_capacity(DEFAULT_CAPACITY)
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        let (sender, receiver) = bounded(capacity);
+        let (sender, receiver) = unbounded();
         JobQueue { sender, receiver }
     }
 
-    /// Push a job to the queue (blocks if full)
+    /// Push a job to the queue (never blocks)
     pub fn push(&self, job: Arc<Job>) -> bool {
         self.sender.send(job).is_ok()
     }
 
-    /// Try to push without blocking
+    /// Try to push without blocking (same as push for unbounded)
     pub fn try_push(&self, job: Arc<Job>) -> bool {
         self.sender.try_send(job).is_ok()
     }

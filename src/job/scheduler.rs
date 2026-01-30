@@ -21,6 +21,8 @@ pub struct JobScheduler {
     files_skipped: AtomicU64,
     /// Files found during scanning (for progress updates)
     files_found: AtomicU64,
+    /// Jobs scheduled (for progress updates during job creation)
+    jobs_scheduled: AtomicU64,
 }
 
 impl JobScheduler {
@@ -33,6 +35,7 @@ impl JobScheduler {
             total_files: AtomicU64::new(0),
             files_skipped: AtomicU64::new(0),
             files_found: AtomicU64::new(0),
+            jobs_scheduled: AtomicU64::new(0),
         }
     }
 
@@ -55,6 +58,11 @@ impl JobScheduler {
     /// Get count of files found during scanning (for progress display)
     pub fn files_found(&self) -> u64 {
         self.files_found.load(Ordering::Relaxed)
+    }
+
+    /// Get count of jobs scheduled (for progress display during job creation)
+    pub fn jobs_scheduled(&self) -> u64 {
+        self.jobs_scheduled.load(Ordering::Relaxed)
     }
 
     /// Enumerate files and create jobs for download
@@ -334,6 +342,7 @@ impl JobScheduler {
                         self.config.verify,
                     ));
                     self.queue.push(job);
+                    self.jobs_scheduled.fetch_add(1, Ordering::Relaxed);
                 }
             }
 
@@ -360,6 +369,7 @@ impl JobScheduler {
                 self.config.verify,
             ));
             self.queue.push(job);
+            self.jobs_scheduled.fetch_add(1, Ordering::Relaxed);
 
             debug_log!("Scheduled download: {}", remote_path);
         }
@@ -527,6 +537,7 @@ impl JobScheduler {
                         self.config.verify,
                     ));
                     self.queue.push(job);
+                    self.jobs_scheduled.fetch_add(1, Ordering::Relaxed);
                 }
             }
 
@@ -552,6 +563,7 @@ impl JobScheduler {
                 self.config.verify,
             ));
             self.queue.push(job);
+            self.jobs_scheduled.fetch_add(1, Ordering::Relaxed);
 
             debug_log!("Scheduled upload: {}", remote_path);
         }
