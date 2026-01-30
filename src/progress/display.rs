@@ -60,6 +60,11 @@ impl ProgressDisplay {
         self.running.store(false, Ordering::SeqCst);
     }
 
+    /// Render one final frame (call after stop, before print_summary)
+    pub fn render_final(&self) {
+        self.render();
+    }
+
     fn render(&self) {
         let mut stdout = io::stdout();
 

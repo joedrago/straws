@@ -226,7 +226,8 @@ async fn run() -> Result<()> {
     // Stop progress display
     if let Some(ref display) = display {
         display.stop();
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        // Render one final frame at 100% before showing summary
+        display.render_final();
         display.print_summary();
     }
 
