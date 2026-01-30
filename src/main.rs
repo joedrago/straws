@@ -15,7 +15,7 @@ use straws::file::finalize::{cleanup_temp, finalize_file};
 use straws::job::types::FileMeta;
 use straws::job::{Direction as JobDirection, Job, JobQueue, JobScheduler};
 use straws::logger::init_logger;
-use straws::progress::{ProgressDisplay, ProgressTracker};
+use straws::progress::{format_count, ProgressDisplay, ProgressTracker};
 use straws::transfer::{download_job, upload_job};
 
 const MAX_RETRIES: u32 = 3;
@@ -69,7 +69,7 @@ async fn run() -> Result<()> {
 
     // Start agents with progress updates
     pool.start(|connected, total| {
-        eprint!("\rConnecting... {}/{} tunnels", connected, total);
+        eprint!("\rConnecting... {} / {} tunnels", format_count(connected as u64), format_count(total as u64));
         let _ = std::io::Write::flush(&mut std::io::stderr());
     }).await?;
 
@@ -78,7 +78,7 @@ async fn run() -> Result<()> {
         eprintln!("\rConnecting... failed                    ");
         return Err(StrawsError::AllAgentsUnhealthy);
     }
-    eprintln!("\rConnecting... {}/{} tunnels ready       ", healthy, config.tunnels);
+    eprintln!("\rConnecting... {} / {} tunnels ready       ", format_count(healthy as u64), format_count(config.tunnels as u64));
     debug_log!("{} agents healthy", healthy);
     tracker.mark_connected();
 
@@ -104,9 +104,9 @@ async fn run() -> Result<()> {
                 let jobs = scheduler.jobs_scheduled();
                 if files != last_files || jobs != last_jobs {
                     if jobs > 0 {
-                        eprint!("\rScanning{}: {} files found, {} jobs scheduled", verify_note, files, jobs);
+                        eprint!("\rScanning{}: {} files found, {} jobs scheduled", verify_note, format_count(files), format_count(jobs));
                     } else {
-                        eprint!("\rScanning{}: {} files found", verify_note, files);
+                        eprint!("\rScanning{}: {} files found", verify_note, format_count(files));
                     }
                     let _ = std::io::Write::flush(&mut std::io::stderr());
                     last_files = files;
@@ -127,9 +127,9 @@ async fn run() -> Result<()> {
     let final_jobs = scheduler.jobs_scheduled();
     if final_jobs > scheduler.total_files() {
         // More jobs than files means chunking occurred
-        eprintln!("\rScanning{}: {} files, {} jobs scheduled       ", verify_note, scheduler.total_files(), final_jobs);
+        eprintln!("\rScanning{}: {} files, {} jobs scheduled       ", verify_note, format_count(scheduler.total_files()), format_count(final_jobs));
     } else {
-        eprintln!("\rScanning{}: {} files found       ", verify_note, scheduler.total_files());
+        eprintln!("\rScanning{}: {} files found       ", verify_note, format_count(scheduler.total_files()));
     }
     tracker.mark_indexed();
 
@@ -148,7 +148,7 @@ async fn run() -> Result<()> {
     if scheduler.total_files() == 0 {
         let skipped = scheduler.files_skipped();
         if skipped > 0 {
-            println!("No files to transfer ({} already complete)", skipped);
+            println!("No files to transfer ({} already complete)", format_count(skipped));
         } else {
             println!("No files to transfer");
         }

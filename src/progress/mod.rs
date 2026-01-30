@@ -6,5 +6,5 @@ pub mod speed;
 pub mod tracker;
 
 pub use display::ProgressDisplay;
-pub use speed::SpeedTracker;
+pub use speed::{format_count, SpeedTracker};
 pub use tracker::ProgressTracker;

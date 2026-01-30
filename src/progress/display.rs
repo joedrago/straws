@@ -13,7 +13,7 @@ use crossterm::{
     terminal::{self, Clear, ClearType},
 };
 
-use super::speed::{format_bytes, format_duration, format_duration_f64, format_speed};
+use super::speed::{format_bytes, format_count, format_duration, format_duration_f64, format_speed};
 use super::tracker::ProgressTracker;
 use crate::agent::{AgentPool, AgentState};
 
@@ -167,7 +167,7 @@ impl ProgressDisplay {
 
         let _ = execute!(
             stdout,
-            Print(format!("  Files   : {}/{}", files_completed, total_files))
+            Print(format!("  Files   : {} / {}", format_count(files_completed), format_count(total_files)))
         );
 
         if files_failed > 0 {
@@ -175,7 +175,7 @@ impl ProgressDisplay {
                 stdout,
                 Print(" ("),
                 SetForegroundColor(Color::Red),
-                Print(format!("{} failed", files_failed)),
+                Print(format!("{} failed", format_count(files_failed))),
                 ResetColor,
                 Print(")")
             );
@@ -361,7 +361,7 @@ impl ProgressDisplay {
                 stdout,
                 Print("  Files: "),
                 SetForegroundColor(Color::Green),
-                Print(format!("{}", files_completed)),
+                Print(format_count(files_completed)),
                 ResetColor,
                 Print("\n")
             );
@@ -372,7 +372,7 @@ impl ProgressDisplay {
                 stdout,
                 Print("  Skipped (already complete): "),
                 SetForegroundColor(Color::Green),
-                Print(format!("{}", files_skipped)),
+                Print(format_count(files_skipped)),
                 ResetColor,
                 Print("\n")
             );
@@ -383,7 +383,7 @@ impl ProgressDisplay {
                 stdout,
                 Print("  "),
                 SetForegroundColor(Color::Red),
-                Print(format!("Failed: {}\n", files_failed)),
+                Print(format!("Failed: {}\n", format_count(files_failed))),
                 ResetColor
             );
         }

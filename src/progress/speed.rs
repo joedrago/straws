@@ -113,6 +113,22 @@ pub fn format_duration(seconds: u64) -> String {
     }
 }
 
+/// Format a count with comma separators (e.g., 12345 -> "12,345")
+pub fn format_count(n: u64) -> String {
+    if n < 1000 {
+        return n.to_string();
+    }
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result
+}
+
 /// Format duration (f64 seconds) as human-readable string with sub-second precision
 pub fn format_duration_f64(seconds: f64) -> String {
     if seconds >= 3600.0 {
@@ -155,5 +171,15 @@ mod tests {
         assert_eq!(format_duration(30), "30s");
         assert_eq!(format_duration(90), "1m30s");
         assert_eq!(format_duration(3700), "1h1m");
+    }
+
+    #[test]
+    fn test_format_count() {
+        assert_eq!(format_count(0), "0");
+        assert_eq!(format_count(999), "999");
+        assert_eq!(format_count(1000), "1,000");
+        assert_eq!(format_count(12345), "12,345");
+        assert_eq!(format_count(1234567), "1,234,567");
+        assert_eq!(format_count(1234567890), "1,234,567,890");
     }
 }
