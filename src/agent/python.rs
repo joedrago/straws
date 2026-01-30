@@ -166,8 +166,12 @@ def handle_find(base_path, with_md5=False):
         sys.stdout.buffer.write(struct.pack('>B', 0))  # success status
         sys.stdout.buffer.flush()
 
+        entry_count = 0
+        FLUSH_INTERVAL = 1000  # Batch flushes for better performance
+
         def send_entry(rel_path, st, fpath):
             """Send entry with path relative to user-provided base_path"""
+            nonlocal entry_count
             # Combine user's original base_path with relative portion
             full_path = os.path.join(base_path, rel_path) if rel_path else base_path
             path_bytes = full_path.encode('utf-8')
@@ -177,7 +181,9 @@ def handle_find(base_path, with_md5=False):
             if with_md5:
                 md5_hex = compute_file_md5(fpath)
                 sys.stdout.buffer.write(md5_hex.encode('ascii'))
-            sys.stdout.buffer.flush()  # Flush after each entry to stream data incrementally
+            entry_count += 1
+            if entry_count % FLUSH_INTERVAL == 0:
+                sys.stdout.buffer.flush()
 
         if os.path.isfile(base):
             # Single file - return with original base_path
