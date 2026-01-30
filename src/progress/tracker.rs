@@ -25,6 +25,14 @@ pub struct CompletedFile {
     pub mtime: u64,
 }
 
+/// Phase timing for summary breakdown
+#[derive(Clone, Default)]
+pub struct PhaseTiming {
+    pub connect_secs: f64,
+    pub index_secs: f64,
+    pub transfer_secs: f64,
+}
+
 /// Thread-safe progress tracking
 pub struct ProgressTracker {
     total_bytes: AtomicU64,
@@ -41,10 +49,14 @@ pub struct ProgressTracker {
     verify_enabled: AtomicBool,
     source_desc: Mutex<String>,
     dest_desc: Mutex<String>,
+    // Phase timing
+    phase_start: Mutex<Instant>,
+    phase_timing: Mutex<PhaseTiming>,
 }
 
 impl ProgressTracker {
     pub fn new(tunnel_count: usize) -> Self {
+        let now = Instant::now();
         ProgressTracker {
             total_bytes: AtomicU64::new(0),
             bytes_transferred: AtomicU64::new(0),
@@ -53,14 +65,49 @@ impl ProgressTracker {
             files_failed: AtomicU64::new(0),
             files_skipped: AtomicU64::new(0),
             speed_tracker: Mutex::new(SpeedTracker::new()),
-            start_time: Instant::now(),
+            start_time: now,
             recent_files: Mutex::new(Vec::new()),
             agent_jobs: Mutex::new(vec![None; tunnel_count]),
             log_events: Mutex::new(Vec::new()),
             verify_enabled: AtomicBool::new(false),
             source_desc: Mutex::new(String::new()),
             dest_desc: Mutex::new(String::new()),
+            phase_start: Mutex::new(now),
+            phase_timing: Mutex::new(PhaseTiming::default()),
         }
+    }
+
+    /// Mark the connect phase as complete, start timing the index phase
+    pub fn mark_connected(&self) {
+        let mut phase_start = self.phase_start.lock();
+        let mut timing = self.phase_timing.lock();
+        timing.connect_secs = phase_start.elapsed().as_secs_f64();
+        *phase_start = Instant::now();
+    }
+
+    /// Mark the index phase as complete, start timing the transfer phase
+    pub fn mark_indexed(&self) {
+        let mut phase_start = self.phase_start.lock();
+        let mut timing = self.phase_timing.lock();
+        timing.index_secs = phase_start.elapsed().as_secs_f64();
+        *phase_start = Instant::now();
+    }
+
+    /// Mark the transfer phase as complete
+    pub fn mark_transfer_complete(&self) {
+        let phase_start = self.phase_start.lock();
+        let mut timing = self.phase_timing.lock();
+        timing.transfer_secs = phase_start.elapsed().as_secs_f64();
+    }
+
+    /// Get phase timing for summary display
+    pub fn phase_timing(&self) -> PhaseTiming {
+        self.phase_timing.lock().clone()
+    }
+
+    /// Get elapsed time in current phase (used for transfer elapsed display)
+    pub fn current_phase_elapsed_secs(&self) -> f64 {
+        self.phase_start.lock().elapsed().as_secs_f64()
     }
 
     pub fn set_totals(&self, bytes: u64, files: u64) {

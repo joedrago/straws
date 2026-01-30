@@ -13,7 +13,7 @@ use crossterm::{
     terminal::{self, Clear, ClearType},
 };
 
-use super::speed::{format_bytes, format_duration, format_speed};
+use super::speed::{format_bytes, format_duration, format_duration_f64, format_speed};
 use super::tracker::ProgressTracker;
 use crate::agent::{AgentPool, AgentState};
 
@@ -136,13 +136,14 @@ impl ProgressDisplay {
             ResetColor,
             Print("\n")
         );
+        let elapsed_transfer = self.tracker.current_phase_elapsed_secs();
         let _ = execute!(
             stdout,
-            Print("  ETA     : "),
-            SetForegroundColor(Color::Yellow),
-            Print(&eta_str),
-            ResetColor,
-            Print("\n")
+            Print(format!("  Elapsed : {}\n", format_duration_f64(elapsed_transfer)))
+        );
+        let _ = execute!(
+            stdout,
+            Print(format!("  ETA     : {}\n", eta_str))
         );
 
         // File counts
@@ -304,6 +305,7 @@ impl ProgressDisplay {
         let files_completed = self.tracker.files_completed();
         let files_failed = self.tracker.files_failed();
         let files_skipped = self.tracker.files_skipped();
+        let timing = self.tracker.phase_timing();
 
         let avg_speed = if elapsed > 0 {
             transferred as f64 / elapsed as f64
@@ -327,6 +329,21 @@ impl ProgressDisplay {
             stdout,
             SetForegroundColor(Color::DarkGrey),
             Print(format!("  Average speed: {}\n", format_speed(avg_speed))),
+            ResetColor
+        );
+
+        // Timing breakdown
+        let total_secs = timing.connect_secs + timing.index_secs + timing.transfer_secs;
+        let _ = execute!(
+            stdout,
+            SetForegroundColor(Color::DarkGrey),
+            Print(format!(
+                "  Timing: {} connect + {} index + {} transfer = {}\n",
+                format_duration_f64(timing.connect_secs),
+                format_duration_f64(timing.index_secs),
+                format_duration_f64(timing.transfer_secs),
+                format_duration_f64(total_secs)
+            )),
             ResetColor
         );
 

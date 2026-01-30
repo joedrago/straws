@@ -113,6 +113,23 @@ pub fn format_duration(seconds: u64) -> String {
     }
 }
 
+/// Format duration (f64 seconds) as human-readable string with sub-second precision
+pub fn format_duration_f64(seconds: f64) -> String {
+    if seconds >= 3600.0 {
+        let hours = (seconds / 3600.0).floor() as u64;
+        let minutes = ((seconds % 3600.0) / 60.0).floor() as u64;
+        format!("{}h{}m", hours, minutes)
+    } else if seconds >= 60.0 {
+        let minutes = (seconds / 60.0).floor() as u64;
+        let secs = (seconds % 60.0).floor() as u64;
+        format!("{}m{}s", minutes, secs)
+    } else if seconds >= 1.0 {
+        format!("{:.1}s", seconds)
+    } else {
+        format!("{:.0}ms", seconds * 1000.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

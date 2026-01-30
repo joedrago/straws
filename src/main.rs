@@ -60,6 +60,9 @@ async fn run() -> Result<()> {
         shutdown_notify_signal.notify_waiters();
     });
 
+    // Create progress tracker (early, to time all phases)
+    let tracker = Arc::new(ProgressTracker::new(config.tunnels));
+
     // Create agent pool
     let pool = Arc::new(AgentPool::new(config.clone()));
     debug_log!("Starting {} agents", config.tunnels);
@@ -77,13 +80,11 @@ async fn run() -> Result<()> {
     }
     eprintln!("\rConnecting... {}/{} tunnels ready       ", healthy, config.tunnels);
     debug_log!("{} agents healthy", healthy);
+    tracker.mark_connected();
 
     // Create job queue and scheduler
     let queue = JobQueue::new();
     let scheduler = Arc::new(JobScheduler::new(config.clone(), queue.clone()));
-
-    // Create progress tracker
-    let tracker = Arc::new(ProgressTracker::new(config.tunnels));
 
     // Schedule jobs based on direction with progress display
     let verify_note = if config.verify { " (with verification)" } else { "" };
@@ -130,6 +131,7 @@ async fn run() -> Result<()> {
     } else {
         eprintln!("\rScanning{}: {} files found       ", verify_note, scheduler.total_files());
     }
+    tracker.mark_indexed();
 
     // Update tracker with totals and descriptions
     tracker.set_totals(scheduler.total_bytes(), scheduler.total_files());
@@ -222,6 +224,7 @@ async fn run() -> Result<()> {
     for handle in worker_handles {
         let _ = handle.await;
     }
+    tracker.mark_transfer_complete();
 
     // Stop progress display
     if let Some(ref display) = display {
