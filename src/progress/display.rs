@@ -9,7 +9,7 @@ use std::time::Duration;
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
     execute,
-    style::{Color, Print, ResetColor, SetForegroundColor},
+    style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
 
@@ -86,9 +86,7 @@ impl ProgressDisplay {
                 SetForegroundColor(Color::Cyan),
                 Print(&source),
                 ResetColor,
-                SetForegroundColor(Color::DarkGrey),
                 Print(" → "),
-                ResetColor,
                 SetForegroundColor(Color::Green),
                 Print(&dest),
                 ResetColor,
@@ -126,7 +124,15 @@ impl ProgressDisplay {
         let _ = execute!(stdout, Print("\n"));
         let _ = execute!(
             stdout,
-            Print(format!("  Progress: {}/{}\n", format_bytes(transferred), format_bytes(total)))
+            Print("  Progress: "),
+            SetForegroundColor(Color::Yellow),
+            Print(format_bytes(transferred)),
+            ResetColor,
+            Print(" / "),
+            SetForegroundColor(Color::Yellow),
+            Print(format_bytes(total)),
+            ResetColor,
+            Print("\n")
         );
         let _ = execute!(
             stdout,
@@ -139,11 +145,19 @@ impl ProgressDisplay {
         let elapsed_transfer = self.tracker.current_phase_elapsed_secs();
         let _ = execute!(
             stdout,
-            Print(format!("  Elapsed : {}\n", format_duration_f64(elapsed_transfer)))
+            Print("  Elapsed : "),
+            SetAttribute(Attribute::Bold),
+            Print(format_duration_f64(elapsed_transfer)),
+            SetAttribute(Attribute::Reset),
+            Print("\n")
         );
         let _ = execute!(
             stdout,
-            Print(format!("  ETA     : {}\n", eta_str))
+            Print("  ETA     : "),
+            SetAttribute(Attribute::Bold),
+            Print(&eta_str),
+            SetAttribute(Attribute::Reset),
+            Print("\n")
         );
 
         // File counts
@@ -170,12 +184,7 @@ impl ProgressDisplay {
 
         // Tunnel grid (always show)
         let _ = execute!(stdout, Print("\n"));
-        let _ = execute!(
-            stdout,
-            SetForegroundColor(Color::DarkGrey),
-            Print("  Agents:\n"),
-            ResetColor
-        );
+        let _ = execute!(stdout, Print("  Agents:\n"));
 
         self.render_agent_grid(&mut stdout, width);
 
@@ -183,12 +192,7 @@ impl ProgressDisplay {
         let log_events = self.tracker.log_events();
         if !log_events.is_empty() {
             let _ = execute!(stdout, Print("\n"));
-            let _ = execute!(
-                stdout,
-                SetForegroundColor(Color::DarkGrey),
-                Print("  Log:\n"),
-                ResetColor
-            );
+            let _ = execute!(stdout, Print("  Log:\n"));
             for event in log_events.iter().rev().take(5) {
                 let color = if event.is_error { Color::Red } else { Color::Yellow };
                 let _ = execute!(
@@ -206,12 +210,7 @@ impl ProgressDisplay {
         let recent = self.tracker.recent_files();
         if !recent.is_empty() {
             let _ = execute!(stdout, Print("\n"));
-            let _ = execute!(
-                stdout,
-                SetForegroundColor(Color::DarkGrey),
-                Print("  Recent:\n"),
-                ResetColor
-            );
+            let _ = execute!(stdout, Print("  Recent:\n"));
             for file in recent.iter().rev().take(5) {
                 let extra_info = if self.verbose {
                     // Verbose: show MD5, mode, mtime
@@ -318,50 +317,64 @@ impl ProgressDisplay {
             SetForegroundColor(Color::Green),
             Print("✓"),
             ResetColor,
-            Print(format!(
-                " Transfer complete: {} in {}\n",
-                format_bytes(transferred),
-                format_duration(elapsed)
-            ))
+            Print(" Transfer complete: "),
+            SetForegroundColor(Color::Yellow),
+            Print(format_bytes(transferred)),
+            ResetColor,
+            Print("\n")
         );
 
         let _ = execute!(
             stdout,
-            SetForegroundColor(Color::DarkGrey),
-            Print(format!("  Average speed: {}\n", format_speed(avg_speed))),
-            ResetColor
+            Print("  Average speed: "),
+            SetForegroundColor(Color::Cyan),
+            Print(format_speed(avg_speed)),
+            ResetColor,
+            Print("\n")
         );
 
         // Timing breakdown
         let total_secs = timing.connect_secs + timing.index_secs + timing.transfer_secs;
         let _ = execute!(
             stdout,
-            SetForegroundColor(Color::DarkGrey),
-            Print(format!(
-                "  Timing: {} connect + {} index + {} transfer = {}\n",
-                format_duration_f64(timing.connect_secs),
-                format_duration_f64(timing.index_secs),
-                format_duration_f64(timing.transfer_secs),
-                format_duration_f64(total_secs)
-            )),
-            ResetColor
+            Print("  Timing: "),
+            SetAttribute(Attribute::Bold),
+            Print(format_duration_f64(total_secs)),
+            SetAttribute(Attribute::Reset),
+            Print(" (connect: "),
+            SetAttribute(Attribute::Bold),
+            Print(format_duration_f64(timing.connect_secs)),
+            SetAttribute(Attribute::Reset),
+            Print(", index: "),
+            SetAttribute(Attribute::Bold),
+            Print(format_duration_f64(timing.index_secs)),
+            SetAttribute(Attribute::Reset),
+            Print(", transfer: "),
+            SetAttribute(Attribute::Bold),
+            Print(format_duration_f64(timing.transfer_secs)),
+            SetAttribute(Attribute::Reset),
+            Print(")\n")
         );
 
         if files_completed > 1 {
             let _ = execute!(
                 stdout,
-                SetForegroundColor(Color::DarkGrey),
-                Print(format!("  Files: {}\n", files_completed)),
-                ResetColor
+                Print("  Files: "),
+                SetForegroundColor(Color::Green),
+                Print(format!("{}", files_completed)),
+                ResetColor,
+                Print("\n")
             );
         }
 
         if files_skipped > 0 {
             let _ = execute!(
                 stdout,
-                SetForegroundColor(Color::DarkGrey),
-                Print(format!("  Skipped (already complete): {}\n", files_skipped)),
-                ResetColor
+                Print("  Skipped (already complete): "),
+                SetForegroundColor(Color::Green),
+                Print(format!("{}", files_skipped)),
+                ResetColor,
+                Print("\n")
             );
         }
 
