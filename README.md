@@ -192,6 +192,22 @@ The tool automatically determines transfer direction based on which side has the
 - **Local**: Rust toolchain for building, or pre-built binary
 - **Remote**: Python 3 and SSH server (standard on most Linux/Unix systems)
 - **SSH access**: Key-based authentication recommended, password authentication supported
+- **For password authentication**: `sshpass` must be installed locally
+
+### Installing sshpass
+
+If you need password authentication (instead of SSH keys), install `sshpass`:
+
+```bash
+# macOS
+brew install sshpass
+
+# Debian/Ubuntu
+sudo apt install sshpass
+
+# RHEL/CentOS/Fedora
+sudo dnf install sshpass
+```
 
 ## Comparison with other tools
 

@@ -80,6 +80,22 @@ impl Agent {
         self.set_state(AgentState::Unhealthy);
     }
 
+    pub fn get_stderr(&self) -> String {
+        self.stderr_buffer.lock().clone()
+    }
+
+    /// Try to get exit status if process has exited
+    pub fn try_exit_status(&self) -> Option<std::process::ExitStatus> {
+        let mut process_guard = self.process.lock();
+        if let Some(ref mut process) = *process_guard {
+            // try_wait returns Ok(Some(status)) if exited, Ok(None) if still running
+            if let Ok(Some(status)) = process.try_wait() {
+                return Some(status);
+            }
+        }
+        None
+    }
+
     /// Send a request and read the full response (for small responses)
     pub async fn request(&self, req: &Request) -> Result<Response> {
         let encoded = req.encode();
@@ -468,6 +484,73 @@ impl AgentPool {
         }
 
         if success_count == 0 {
+            // Collect stderr from agents to provide better error messages
+            // Give SSH a moment to write its error messages
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let mut auth_errors = Vec::new();
+            let mut other_errors = Vec::new();
+
+            for agent in &self.agents {
+                // Check process exit code first (especially for sshpass)
+                // sshpass exit codes: 5 = wrong password, 6 = host key unknown
+                if let Some(status) = agent.try_exit_status() {
+                    if let Some(code) = status.code() {
+                        match code {
+                            5 => {
+                                auth_errors.push("Incorrect password".to_string());
+                                continue;
+                            }
+                            6 => {
+                                other_errors.push("Host public key is unknown".to_string());
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                let stderr = agent.get_stderr();
+                if !stderr.is_empty() {
+                    // Check for authentication-related errors
+                    let stderr_lower = stderr.to_lowercase();
+                    if stderr_lower.contains("permission denied")
+                        || stderr_lower.contains("authentication failed")
+                        || stderr_lower.contains("no more authentication methods")
+                        || stderr_lower.contains("publickey,password")
+                        || stderr_lower.contains("too many authentication failures")
+                        || stderr_lower.contains("incorrect password")
+                        || stderr_lower.contains("wrong password")
+                    {
+                        auth_errors.push(stderr.trim().to_string());
+                    } else if stderr_lower.contains("could not resolve")
+                        || stderr_lower.contains("connection refused")
+                        || stderr_lower.contains("connection timed out")
+                        || stderr_lower.contains("no route to host")
+                    {
+                        other_errors.push(stderr.trim().to_string());
+                    } else {
+                        other_errors.push(stderr.trim().to_string());
+                    }
+                }
+            }
+
+            // Deduplicate errors (all agents likely have the same error)
+            auth_errors.dedup();
+            other_errors.dedup();
+
+            if !auth_errors.is_empty() {
+                return Err(StrawsError::Connection(format!(
+                    "SSH authentication failed: {}",
+                    auth_errors.first().unwrap()
+                )));
+            } else if !other_errors.is_empty() {
+                return Err(StrawsError::Connection(format!(
+                    "SSH connection failed: {}",
+                    other_errors.first().unwrap()
+                )));
+            }
+
             return Err(StrawsError::AllAgentsUnhealthy);
         }
 
@@ -476,12 +559,31 @@ impl AgentPool {
     }
 
     async fn start_agent(agent: &Agent, config: &Config) -> Result<()> {
-        let mut cmd = Command::new("ssh");
+        // Use sshpass if password is provided
+        let using_sshpass = config.password.is_some();
+        let mut cmd = if using_sshpass {
+            let mut c = Command::new("sshpass");
+            c.arg("-e"); // Read password from SSHPASS env var
+            c.arg("ssh");
+            c
+        } else {
+            Command::new("ssh")
+        };
+
+        // Set SSHPASS env var if password is provided
+        if let Some(ref password) = config.password {
+            cmd.env("SSHPASS", password);
+        }
 
         // Basic SSH options
-        cmd.arg("-T") // No PTY
-            .arg("-o").arg("BatchMode=yes")
-            .arg("-o").arg("StrictHostKeyChecking=accept-new")
+        cmd.arg("-T"); // No PTY
+
+        // Only use BatchMode when not using password auth
+        if config.password.is_none() {
+            cmd.arg("-o").arg("BatchMode=yes");
+        }
+
+        cmd.arg("-o").arg("StrictHostKeyChecking=accept-new")
             .arg("-o").arg("ServerAliveInterval=60")
             .arg("-o").arg("ServerAliveCountMax=3")
             .arg("-p").arg(config.port.to_string());

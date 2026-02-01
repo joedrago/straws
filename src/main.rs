@@ -20,6 +20,19 @@ use straws::transfer::{download_job, upload_job};
 
 const MAX_RETRIES: u32 = 3;
 
+fn check_sshpass_available() -> Result<()> {
+    match std::process::Command::new("sshpass").arg("-V").output() {
+        Ok(output) if output.status.success() => Ok(()),
+        _ => Err(StrawsError::Config(
+            "Password authentication requires 'sshpass' to be installed.\n\
+             Install it with:\n  \
+               macOS:  brew install sshpass\n  \
+               Ubuntu: sudo apt install sshpass\n  \
+               Fedora: sudo dnf install sshpass".to_string()
+        )),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     if let Err(e) = run().await {
@@ -41,6 +54,11 @@ async fn run() -> Result<()> {
         args.password_file.as_deref(),
         &args.password_env,
     )?;
+
+    // If password is provided, verify sshpass is available
+    if password.is_some() {
+        check_sshpass_available()?;
+    }
 
     // Build config
     let config = Config::from_args(args.clone(), password)?;
