@@ -540,9 +540,19 @@ impl AgentPool {
             other_errors.dedup();
 
             if !auth_errors.is_empty() {
+                let error_msg = auth_errors.first().unwrap();
+                // If server supports password auth but no password was provided, hint about --password
+                let hint = if self.config.password.is_none()
+                    && error_msg.to_lowercase().contains("password")
+                {
+                    "\n\nHint: If password authentication is required, see --help for options"
+                } else {
+                    ""
+                };
                 return Err(StrawsError::Connection(format!(
-                    "SSH authentication failed: {}",
-                    auth_errors.first().unwrap()
+                    "SSH authentication failed: {}{}",
+                    error_msg,
+                    hint
                 )));
             } else if !other_errors.is_empty() {
                 return Err(StrawsError::Connection(format!(
@@ -612,7 +622,16 @@ impl AgentPool {
         debug_log!("Starting agent {}: {:?}", agent.id, cmd);
 
         let mut process = cmd.spawn().map_err(|e| {
-            StrawsError::Connection(format!("Failed to spawn SSH: {}", e))
+            if using_sshpass && e.kind() == std::io::ErrorKind::NotFound {
+                StrawsError::Connection(
+                    "Failed to spawn sshpass (not installed). \
+                     Install it with: brew install sshpass (macOS), \
+                     sudo apt install sshpass (Ubuntu), or \
+                     sudo dnf install sshpass (Fedora)".to_string()
+                )
+            } else {
+                StrawsError::Connection(format!("Failed to spawn SSH: {}", e))
+            }
         })?;
 
         let stdin = process.stdin.take().ok_or_else(|| {

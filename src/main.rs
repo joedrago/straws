@@ -86,10 +86,14 @@ async fn run() -> Result<()> {
     debug_log!("Starting {} agents", config.tunnels);
 
     // Start agents with progress updates
-    pool.start(|connected, total| {
+    let start_result = pool.start(|connected, total| {
         eprint!("\rConnecting... {} / {} tunnels", format_count(connected as u64), format_count(total as u64));
         let _ = std::io::Write::flush(&mut std::io::stderr());
-    }).await?;
+    }).await;
+    if let Err(e) = start_result {
+        eprintln!();
+        return Err(e);
+    }
 
     let healthy = pool.healthy_count();
     if healthy == 0 {
