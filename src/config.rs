@@ -5,10 +5,14 @@ use crate::error::{Result, StrawsError};
 use clap::Parser;
 use std::path::PathBuf;
 
+fn version_string() -> &'static str {
+    concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_SHA"), ")")
+}
+
 /// High-performance SSH file transfer tool
 #[derive(Parser, Debug, Clone)]
 #[command(name = "straws")]
-#[command(author, version, about, long_about = None)]
+#[command(author, version = version_string(), about, long_about = None)]
 pub struct Args {
     /// Source path(s) - can be local or remote (user@host:path)
     #[arg(required = true)]
