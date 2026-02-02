@@ -274,10 +274,29 @@ async fn run() -> Result<()> {
     debug_log!("Transfer complete");
 
     if tracker.files_failed() > 0 {
-        return Err(StrawsError::MaxRetries(format!(
-            "{} files failed",
-            tracker.files_failed()
-        )));
+        let failed_count = tracker.files_failed();
+        let failed_files = tracker.failed_files();
+
+        // Build a detailed error message
+        let mut msg = format!(
+            "{} file{} failed to transfer",
+            failed_count,
+            if failed_count == 1 { "" } else { "s" }
+        );
+
+        // If there are few failures, include them in the error message itself
+        if failed_files.len() <= 5 {
+            msg.push_str(":\n");
+            for failed in &failed_files {
+                msg.push_str(&format!("  - {}: {}\n", failed.remote_path, failed.error));
+            }
+        } else {
+            msg.push_str(" (see list above)");
+        }
+
+        msg.push_str("\nRun the same command again to retry failed files.");
+
+        return Err(StrawsError::TransferFailed(msg));
     }
 
     Ok(())
@@ -350,7 +369,12 @@ async fn worker_loop(
             Some(a) => a,
             None => {
                 debug_log!("Worker {} cannot acquire agent for job {}", worker_id, job.id);
-                tracker.file_failed();
+                tracker.file_failed(
+                    &job.file_meta.remote_path,
+                    &job.file_meta.local_path.display().to_string(),
+                    "All transfer agents became unavailable (connection failures)",
+                    job.retries(),
+                );
                 continue;
             }
         };
@@ -380,7 +404,12 @@ async fn worker_loop(
                     if job.direction == JobDirection::Download {
                         if let Err(e) = finalize_file(&job.file_meta) {
                             debug_log!("Failed to finalize {}: {}", job.file_meta.remote_path, e);
-                            tracker.file_failed();
+                            tracker.file_failed(
+                                &job.file_meta.remote_path,
+                                &job.file_meta.local_path.display().to_string(),
+                                &format!("Failed to save file locally: {}", e),
+                                job.retries(),
+                            );
                         } else {
                             let name = job
                                 .file_meta
@@ -432,19 +461,34 @@ async fn worker_loop(
                         debug_log!("Requeuing job {} (retry {})", job.id, retries);
                         tracker.log_event(&format!("Retrying {}: {}", file_name, e), false);
                         // Requeue the job
-                        if sender.try_send(job).is_err() {
+                        if sender.try_send(job.clone()).is_err() {
                             debug_log!("Failed to requeue job, queue full or closed");
                             tracker.log_event(&format!("Failed {}: queue full", file_name), true);
-                            tracker.file_failed();
+                            tracker.file_failed(
+                                &job.file_meta.remote_path,
+                                &job.file_meta.local_path.display().to_string(),
+                                &format!("Transfer queue full, could not retry after: {}", e),
+                                retries,
+                            );
                         }
                     } else {
                         debug_log!("Job {} max retries exceeded", job.id);
                         tracker.log_event(&format!("Failed {}: max retries", file_name), true);
-                        tracker.file_failed();
+                        tracker.file_failed(
+                            &job.file_meta.remote_path,
+                            &job.file_meta.local_path.display().to_string(),
+                            &format!("Failed after {} retries: {}", MAX_RETRIES, e),
+                            retries,
+                        );
                     }
                 } else {
                     tracker.log_event(&format!("Failed {}: {}", file_name, e), true);
-                    tracker.file_failed();
+                    tracker.file_failed(
+                        &job.file_meta.remote_path,
+                        &job.file_meta.local_path.display().to_string(),
+                        &e.to_string(),
+                        job.retries(),
+                    );
                 }
             }
         }

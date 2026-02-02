@@ -386,6 +386,55 @@ impl ProgressDisplay {
                 Print(format!("Failed: {}\n", format_count(files_failed))),
                 ResetColor
             );
+
+            // Show details for each failed file
+            let failed_files = self.tracker.failed_files();
+            let _ = execute!(stdout, Print("\n"));
+            let _ = execute!(
+                stdout,
+                Print("  "),
+                SetForegroundColor(Color::Red),
+                SetAttribute(Attribute::Bold),
+                Print("Failed files:\n"),
+                SetAttribute(Attribute::Reset),
+                ResetColor
+            );
+
+            let max_to_show = 20;
+            for (i, failed) in failed_files.iter().enumerate() {
+                if i >= max_to_show {
+                    let remaining = failed_files.len() - max_to_show;
+                    let _ = execute!(
+                        stdout,
+                        Print("    "),
+                        SetForegroundColor(Color::DarkGrey),
+                        Print(format!("... and {} more\n", remaining)),
+                        ResetColor
+                    );
+                    break;
+                }
+
+                // Show remote path (what we were trying to transfer)
+                let _ = execute!(
+                    stdout,
+                    Print("    "),
+                    SetForegroundColor(Color::Red),
+                    Print("✗ "),
+                    ResetColor,
+                    Print(&failed.remote_path),
+                    Print("\n")
+                );
+
+                // Show the error reason indented
+                let _ = execute!(
+                    stdout,
+                    Print("      "),
+                    SetForegroundColor(Color::Yellow),
+                    Print(&failed.error),
+                    ResetColor,
+                    Print("\n")
+                );
+            }
         }
 
         println!();

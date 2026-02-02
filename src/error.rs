@@ -15,13 +15,13 @@ pub enum StrawsError {
     #[error("Remote error: {0}")]
     Remote(String),
 
-    #[error("Agent stalled (no data for {0} seconds)")]
+    #[error("Transfer stalled (no data received for {0} seconds, network or remote issue)")]
     Stall(u64),
 
     #[error("Agent connection failed: {0}")]
     Connection(String),
 
-    #[error("All agents unhealthy")]
+    #[error("All SSH connections failed or became unavailable")]
     AllAgentsUnhealthy,
 
     #[error("MD5 verification failed for {path}: expected {expected}, got {actual}")]
@@ -31,8 +31,8 @@ pub enum StrawsError {
         actual: String,
     },
 
-    #[error("Max retries exceeded for {0}")]
-    MaxRetries(String),
+    #[error("{0}")]
+    TransferFailed(String),
 
     #[error("Invalid path: {0}")]
     InvalidPath(String),
@@ -81,7 +81,7 @@ impl StrawsError {
             StrawsError::AllAgentsUnhealthy
                 | StrawsError::Config(_)
                 | StrawsError::Aborted
-                | StrawsError::MaxRetries(_)
+                | StrawsError::TransferFailed(_)
         )
     }
 }

@@ -25,6 +25,15 @@ pub struct CompletedFile {
     pub mtime: u64,
 }
 
+/// A failed file with error details
+#[derive(Clone)]
+pub struct FailedFile {
+    pub remote_path: String,
+    pub local_path: String,
+    pub error: String,
+    pub retries: u32,
+}
+
 /// Phase timing for summary breakdown
 #[derive(Clone, Default)]
 pub struct PhaseTiming {
@@ -44,6 +53,7 @@ pub struct ProgressTracker {
     speed_tracker: Mutex<SpeedTracker>,
     start_time: Instant,
     recent_files: Mutex<Vec<CompletedFile>>,
+    failed_files: Mutex<Vec<FailedFile>>,
     agent_jobs: Mutex<Vec<Option<String>>>, // Current job description per agent
     log_events: Mutex<Vec<LogEvent>>,
     verify_enabled: AtomicBool,
@@ -67,6 +77,7 @@ impl ProgressTracker {
             speed_tracker: Mutex::new(SpeedTracker::new()),
             start_time: now,
             recent_files: Mutex::new(Vec::new()),
+            failed_files: Mutex::new(Vec::new()),
             agent_jobs: Mutex::new(vec![None; tunnel_count]),
             log_events: Mutex::new(Vec::new()),
             verify_enabled: AtomicBool::new(false),
@@ -185,8 +196,22 @@ impl ProgressTracker {
         }
     }
 
-    pub fn file_failed(&self) {
+    /// Record a file failure with full details about why it failed
+    pub fn file_failed(&self, remote_path: &str, local_path: &str, error: &str, retries: u32) {
         self.files_failed.fetch_add(1, Ordering::Relaxed);
+
+        let mut failed = self.failed_files.lock();
+        failed.push(FailedFile {
+            remote_path: remote_path.to_string(),
+            local_path: local_path.to_string(),
+            error: error.to_string(),
+            retries,
+        });
+    }
+
+    /// Get all failed files with their error details
+    pub fn failed_files(&self) -> Vec<FailedFile> {
+        self.failed_files.lock().clone()
     }
 
     pub fn set_agent_job(&self, agent_id: usize, job_desc: Option<String>) {
