@@ -13,8 +13,11 @@ use super::metadata::{set_mode, set_mtime};
 /// Uses OnceLock pattern to ensure only one chunk finalizes even if multiple
 /// chunks complete nearly simultaneously.
 pub fn finalize_file(file_meta: &Arc<FileMeta>) -> Result<()> {
-    // Use OnceLock to ensure only one caller does the actual finalization
-    let result = file_meta.store_finalize_result(do_finalize(file_meta));
+    // Use OnceLock to ensure only one caller does the actual finalization.
+    // IMPORTANT: The closure defers do_finalize() until inside get_or_init(),
+    // preventing a race where multiple threads could call do_finalize() and
+    // the losing thread's error would be cached instead of the winner's success.
+    let result = file_meta.ensure_finalized(|| do_finalize(file_meta));
     result.map_err(|e| StrawsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))
 }
 

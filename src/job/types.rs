@@ -119,10 +119,14 @@ impl FileMeta {
         self.truncate_result.get().is_some()
     }
 
-    /// Store finalization result. Only the first caller's result is stored;
+    /// Execute finalization. Only the first caller does the work;
     /// subsequent callers get the cached result.
-    pub fn store_finalize_result(&self, result: Result<(), String>) -> Result<(), String> {
-        self.finalize_result.get_or_init(|| result).clone()
+    /// The closure is only called if finalization hasn't been attempted yet.
+    pub fn ensure_finalized<F>(&self, f: F) -> Result<(), String>
+    where
+        F: FnOnce() -> Result<(), String>,
+    {
+        self.finalize_result.get_or_init(f).clone()
     }
 
     /// Check if finalization has been attempted (regardless of result)

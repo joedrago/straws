@@ -423,7 +423,7 @@ async fn worker_loop(
                         }
                     } else {
                         // For uploads, mark as finalized to prevent duplicate completion tracking
-                        let _ = job.file_meta.store_finalize_result(Ok(()));
+                        let _ = job.file_meta.ensure_finalized(|| Ok(()));
                         let name = job
                             .file_meta
                             .local_path
