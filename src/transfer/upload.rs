@@ -108,11 +108,16 @@ pub async fn upload_job(
                 current_offset,
                 buf[..n].to_vec(),
             );
-            agent.send_request(&write_req).await?;
+            agent.send_request(&write_req, n as u64).await?;
 
             pending.push_back(n as u64);
             remaining -= n as u64;
             current_offset += n as u64;
+        }
+
+        // Flush all batched requests before reading responses
+        if !pending.is_empty() {
+            agent.flush_requests().await?;
         }
 
         // Read one response (if we have pending requests)

@@ -164,8 +164,12 @@ impl Agent {
 
     /// Send a request without waiting for a response.
     /// Used for pipelining multiple requests before reading responses.
-    /// Caller must ensure they call read_response() for each request sent.
-    pub async fn send_request(&self, req: &Request) -> Result<()> {
+    /// Caller must ensure they call read_response() for each request sent,
+    /// and should call flush_requests() after batching requests.
+    ///
+    /// The `bytes_sent` parameter tracks payload bytes for throughput metrics
+    /// (use 0 for requests without meaningful data, like reads).
+    pub async fn send_request(&self, req: &Request, bytes_sent: u64) -> Result<()> {
         let encoded = req.encode();
 
         let mut stdin_guard = self.stdin.lock().await;
@@ -177,6 +181,21 @@ impl Agent {
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
             .map_err(|e| StrawsError::Io(e))?;
+
+        if bytes_sent > 0 {
+            self.add_bytes(bytes_sent);
+        }
+
+        Ok(())
+    }
+
+    /// Flush all pending requests to the remote.
+    /// Call this after batching multiple send_request() calls.
+    pub async fn flush_requests(&self) -> Result<()> {
+        let mut stdin_guard = self.stdin.lock().await;
+        let stdin = stdin_guard
+            .as_mut()
+            .ok_or_else(|| StrawsError::Connection("Agent stdin not available".to_string()))?;
 
         timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.flush())
             .await
