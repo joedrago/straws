@@ -161,10 +161,14 @@ async fn run() -> Result<()> {
     tracker.set_verify_enabled(config.verify);
 
     // Set source/destination descriptions for display
-    let source_desc = format!("{}:{}", config.remote.user_host(), config.remote.path);
-    let dest_desc = config.local_paths.first()
+    let remote_desc = format!("{}:{}", config.remote.user_host(), config.remote.path);
+    let local_desc = config.local_paths.first()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| ".".to_string());
+    let (source_desc, dest_desc) = match config.direction {
+        Direction::Download => (remote_desc, local_desc),
+        Direction::Upload => (local_desc, remote_desc),
+    };
     tracker.set_descriptions(&source_desc, &dest_desc);
 
     if scheduler.total_files() == 0 {
