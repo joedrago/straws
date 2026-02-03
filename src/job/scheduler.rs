@@ -429,7 +429,7 @@ impl JobScheduler {
                     remote_dest.clone()
                 };
 
-                self.create_upload_jobs(local_path, &remote_path, &metadata, pool.agents().len())
+                self.create_upload_jobs(pool, local_path, &remote_path, &metadata)
                     .await?;
             }
         }
@@ -470,7 +470,7 @@ impl JobScheduler {
                 // Recursively enumerate
                 Box::pin(self.enumerate_local_directory(pool, &path, &remote_path)).await?;
             } else {
-                self.create_upload_jobs(&path, &remote_path, &metadata, pool.agents().len())
+                self.create_upload_jobs(pool, &path, &remote_path, &metadata)
                     .await?;
             }
         }
@@ -480,12 +480,74 @@ impl JobScheduler {
 
     async fn create_upload_jobs(
         &self,
+        pool: &AgentPool,
         local_path: &PathBuf,
         remote_path: &str,
         metadata: &std::fs::Metadata,
-        tunnel_count: usize,
     ) -> Result<()> {
         let size = metadata.len();
+        let tunnel_count = pool.agents().len();
+
+        // Check if remote file already exists and is complete
+        let agent = pool.acquire().ok_or(StrawsError::AllAgentsUnhealthy)?;
+        let stat_result = agent.request(&Request::stat(remote_path)).await;
+        pool.release(&agent);
+
+        if let Ok(response) = stat_result {
+            if response.is_success() {
+                if let Ok(remote_stat) = response.parse_stat() {
+                    if remote_stat.size == size {
+                        // Sizes match - check MD5 if verify is enabled
+                        if self.config.verify {
+                            // Compute local MD5
+                            let local_md5 = match compute_file_md5(local_path).await {
+                                Ok(md5) => md5,
+                                Err(e) => {
+                                    debug_log!("Failed to compute local MD5: {}, will upload", e);
+                                    String::new()
+                                }
+                            };
+
+                            if !local_md5.is_empty() {
+                                // Get remote MD5
+                                let agent = pool.acquire().ok_or(StrawsError::AllAgentsUnhealthy)?;
+                                let md5_result = agent.request(&Request::md5(remote_path, 0, size)).await;
+                                pool.release(&agent);
+
+                                if let Ok(md5_response) = md5_result {
+                                    if md5_response.is_success() {
+                                        let remote_md5 = String::from_utf8_lossy(&md5_response.data).to_string();
+                                        if local_md5 == remote_md5 {
+                                            debug_log!(
+                                                "Skipping verified upload: {} (MD5 matches)",
+                                                remote_path
+                                            );
+                                            self.files_skipped.fetch_add(1, Ordering::Relaxed);
+                                            return Ok(());
+                                        } else {
+                                            debug_log!(
+                                                "MD5 mismatch for {}: local={} remote={}, will upload",
+                                                remote_path,
+                                                local_md5,
+                                                remote_md5
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // No verify - skip by size only
+                            debug_log!(
+                                "Skipping existing remote file: {} (size matches)",
+                                remote_path
+                            );
+                            self.files_skipped.fetch_add(1, Ordering::Relaxed);
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
 
         #[cfg(unix)]
         let mode = {
