@@ -81,8 +81,9 @@ pub async fn upload_job(
 
     // Pipelined upload loop:
     // 1. Send requests until we hit PIPELINE_DEPTH or run out of data
-    // 2. Read one response
-    // 3. Repeat until all data sent and all responses received
+    // 2. Flush once to send the batch
+    // 3. Read responses until pipeline is half empty (or fully drained if done)
+    // 4. Repeat until all data sent and all responses received
     while !done_reading || !pending.is_empty() {
         // Fill the pipeline with write requests
         while !done_reading && pending.len() < PIPELINE_DEPTH {
@@ -120,8 +121,11 @@ pub async fn upload_job(
             agent.flush_requests().await?;
         }
 
-        // Read one response (if we have pending requests)
-        if let Some(bytes_sent) = pending.pop_front() {
+        // Read responses - drain to half capacity to make room for more writes,
+        // or drain completely if we're done reading the file
+        let drain_to = if done_reading { 0 } else { PIPELINE_DEPTH / 2 };
+        while pending.len() > drain_to {
+            let bytes_sent = pending.pop_front().unwrap();
             let response = agent.read_response().await?;
 
             if !response.is_success() {
