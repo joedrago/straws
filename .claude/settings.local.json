@@ -5,7 +5,9 @@
       "Bash(chmod:*)",
       "Bash(python3:*)",
       "Bash(cargo check:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)"
     ]
   }
 }

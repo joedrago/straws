@@ -1,6 +1,7 @@
 // Copyright (c) 2026, Joe Drago
 // SPDX-License-Identifier: BSD-2-Clause
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use md5::{Digest, Md5};
@@ -15,6 +16,11 @@ use crate::job::types::{Job, JobResult};
 use crate::progress::tracker::ProgressTracker;
 
 const IO_BUFFER_SIZE: usize = 524288; // 512KB
+
+/// Maximum number of write requests to have in flight at once.
+/// This enables pipelining to hide network latency.
+/// 16 * 512KB = 8MB in flight, which fits comfortably in SSH buffers.
+const PIPELINE_DEPTH: usize = 16;
 
 /// Execute an upload job
 pub async fn upload_job(
@@ -69,38 +75,65 @@ pub async fn upload_job(
     let mut total_written = 0u64;
     let mut buf = vec![0u8; IO_BUFFER_SIZE];
 
-    while remaining > 0 {
-        let to_read = std::cmp::min(remaining as usize, buf.len());
-        let n = file
-            .read(&mut buf[..to_read])
-            .await
-            .map_err(|e| StrawsError::Io(e))?;
+    // Track bytes sent for each pending request (for progress reporting)
+    let mut pending: VecDeque<u64> = VecDeque::with_capacity(PIPELINE_DEPTH);
+    let mut done_reading = false;
 
-        if n == 0 {
-            break;
+    // Pipelined upload loop:
+    // 1. Send requests until we hit PIPELINE_DEPTH or run out of data
+    // 2. Read one response
+    // 3. Repeat until all data sent and all responses received
+    while !done_reading || !pending.is_empty() {
+        // Fill the pipeline with write requests
+        while !done_reading && pending.len() < PIPELINE_DEPTH {
+            let to_read = std::cmp::min(remaining as usize, buf.len());
+            if to_read == 0 {
+                done_reading = true;
+                break;
+            }
+
+            let n = file
+                .read(&mut buf[..to_read])
+                .await
+                .map_err(|e| StrawsError::Io(e))?;
+
+            if n == 0 {
+                done_reading = true;
+                break;
+            }
+
+            // Send write request without waiting for response
+            let write_req = Request::write(
+                &job.file_meta.remote_path,
+                current_offset,
+                buf[..n].to_vec(),
+            );
+            agent.send_request(&write_req).await?;
+
+            pending.push_back(n as u64);
+            remaining -= n as u64;
+            current_offset += n as u64;
         }
 
-        // Send write request
-        let write_req = Request::write(
-            &job.file_meta.remote_path,
-            current_offset,
-            buf[..n].to_vec(),
-        );
-        let response = agent.request(&write_req).await?;
+        // Read one response (if we have pending requests)
+        if let Some(bytes_sent) = pending.pop_front() {
+            let response = agent.read_response().await?;
 
-        if !response.is_success() {
-            return Err(StrawsError::Remote(
-                response
-                    .error_message()
-                    .unwrap_or_else(|| "Write failed".to_string()),
-            ));
+            if !response.is_success() {
+                // On error, mark agent unhealthy since we have orphaned requests in flight
+                // The agent's state will be inconsistent (pending responses we won't read)
+                agent.mark_unhealthy("Write failed mid-pipeline");
+                return Err(StrawsError::Remote(
+                    response
+                        .error_message()
+                        .unwrap_or_else(|| "Write failed".to_string()),
+                ));
+            }
+
+            total_written += bytes_sent;
+            job.file_meta.add_bytes(bytes_sent);
+            tracker.add_bytes(bytes_sent);
         }
-
-        remaining -= n as u64;
-        current_offset += n as u64;
-        total_written += n as u64;
-        job.file_meta.add_bytes(n as u64);
-        tracker.add_bytes(n as u64);
     }
 
     // Mark chunk complete

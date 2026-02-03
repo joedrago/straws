@@ -162,6 +162,70 @@ impl Agent {
         })
     }
 
+    /// Send a request without waiting for a response.
+    /// Used for pipelining multiple requests before reading responses.
+    /// Caller must ensure they call read_response() for each request sent.
+    pub async fn send_request(&self, req: &Request) -> Result<()> {
+        let encoded = req.encode();
+
+        let mut stdin_guard = self.stdin.lock().await;
+        let stdin = stdin_guard
+            .as_mut()
+            .ok_or_else(|| StrawsError::Connection("Agent stdin not available".to_string()))?;
+
+        timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.write_all(&encoded))
+            .await
+            .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
+            .map_err(|e| StrawsError::Io(e))?;
+
+        timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.flush())
+            .await
+            .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
+            .map_err(|e| StrawsError::Io(e))?;
+
+        Ok(())
+    }
+
+    /// Read a response from a previously sent request.
+    /// Used for pipelining - call once for each send_request().
+    pub async fn read_response(&self) -> Result<Response> {
+        let mut stdout_guard = self.stdout.lock().await;
+        let stdout = stdout_guard
+            .as_mut()
+            .ok_or_else(|| StrawsError::Connection("Agent stdout not available".to_string()))?;
+
+        // Read response header
+        let mut header_buf = [0u8; ResponseHeader::SIZE];
+        timeout(
+            Duration::from_secs(STALL_TIMEOUT_SECS),
+            stdout.read_exact(&mut header_buf),
+        )
+        .await
+        .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
+        .map_err(|e| StrawsError::Io(e))?;
+
+        let header = ResponseHeader::decode(&header_buf)?;
+
+        // Read response data
+        let mut data = vec![0u8; header.data_len as usize];
+        if header.data_len > 0 {
+            timeout(
+                Duration::from_secs(STALL_TIMEOUT_SECS),
+                stdout.read_exact(&mut data),
+            )
+            .await
+            .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
+            .map_err(|e| StrawsError::Io(e))?;
+
+            self.add_bytes(header.data_len);
+        }
+
+        Ok(Response {
+            status: header.status,
+            data,
+        })
+    }
+
     /// Send a read request and stream data to a writer
     /// If on_progress is provided, it will be called with each chunk's byte count
     pub async fn stream_read<W, F>(
