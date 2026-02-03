@@ -253,55 +253,57 @@ impl JobScheduler {
         remote_md5: Option<&str>,
         tunnel_count: usize,
     ) -> Result<()> {
-        // Check if file already exists and is complete
-        if let Ok(local_meta) = tokio::fs::metadata(local_path).await {
-            if local_meta.len() == stat.size {
-                // If verify is enabled and we have remote MD5, check it
-                if self.config.verify {
-                    if let Some(expected_md5) = remote_md5 {
-                        debug_log!("Verifying existing file: {}", local_path.display());
+        // Check if file already exists and is complete (skip if --force)
+        if !self.config.force {
+            if let Ok(local_meta) = tokio::fs::metadata(local_path).await {
+                if local_meta.len() == stat.size {
+                    // If verify is enabled and we have remote MD5, check it
+                    if self.config.verify {
+                        if let Some(expected_md5) = remote_md5 {
+                            debug_log!("Verifying existing file: {}", local_path.display());
 
-                        // Compute local MD5
-                        let local_md5 = match compute_file_md5(local_path).await {
-                            Ok(md5) => md5,
-                            Err(e) => {
-                                debug_log!("Failed to compute local MD5: {}, will redownload", e);
-                                String::new()
+                            // Compute local MD5
+                            let local_md5 = match compute_file_md5(local_path).await {
+                                Ok(md5) => md5,
+                                Err(e) => {
+                                    debug_log!("Failed to compute local MD5: {}, will redownload", e);
+                                    String::new()
+                                }
+                            };
+
+                            if !local_md5.is_empty() && local_md5 == expected_md5 {
+                                debug_log!(
+                                    "Skipping verified file: {} (MD5 matches)",
+                                    local_path.display()
+                                );
+                                self.files_skipped.fetch_add(1, Ordering::Relaxed);
+                                return Ok(());
+                            } else if !local_md5.is_empty() {
+                                debug_log!(
+                                    "MD5 mismatch for {}: local={} remote={}, will redownload",
+                                    local_path.display(),
+                                    local_md5,
+                                    expected_md5
+                                );
                             }
-                        };
-
-                        if !local_md5.is_empty() && local_md5 == expected_md5 {
+                            // Fall through to download the file
+                        } else {
+                            // No remote MD5 available, skip by size only
                             debug_log!(
-                                "Skipping verified file: {} (MD5 matches)",
+                                "Skipping existing file: {} (size matches, no MD5 available)",
                                 local_path.display()
                             );
                             self.files_skipped.fetch_add(1, Ordering::Relaxed);
                             return Ok(());
-                        } else if !local_md5.is_empty() {
-                            debug_log!(
-                                "MD5 mismatch for {}: local={} remote={}, will redownload",
-                                local_path.display(),
-                                local_md5,
-                                expected_md5
-                            );
                         }
-                        // Fall through to download the file
                     } else {
-                        // No remote MD5 available, skip by size only
                         debug_log!(
-                            "Skipping existing file: {} (size matches, no MD5 available)",
+                            "Skipping existing file: {} (size matches)",
                             local_path.display()
                         );
                         self.files_skipped.fetch_add(1, Ordering::Relaxed);
                         return Ok(());
                     }
-                } else {
-                    debug_log!(
-                        "Skipping existing file: {} (size matches)",
-                        local_path.display()
-                    );
-                    self.files_skipped.fetch_add(1, Ordering::Relaxed);
-                    return Ok(());
                 }
             }
         }
@@ -488,61 +490,63 @@ impl JobScheduler {
         let size = metadata.len();
         let tunnel_count = pool.agents().len();
 
-        // Check if remote file already exists and is complete
-        let agent = pool.acquire().ok_or(StrawsError::AllAgentsUnhealthy)?;
-        let stat_result = agent.request(&Request::stat(remote_path)).await;
-        pool.release(&agent);
+        // Check if remote file already exists and is complete (skip if --force)
+        if !self.config.force {
+            let agent = pool.acquire().ok_or(StrawsError::AllAgentsUnhealthy)?;
+            let stat_result = agent.request(&Request::stat(remote_path)).await;
+            pool.release(&agent);
 
-        if let Ok(response) = stat_result {
-            if response.is_success() {
-                if let Ok(remote_stat) = response.parse_stat() {
-                    if remote_stat.size == size {
-                        // Sizes match - check MD5 if verify is enabled
-                        if self.config.verify {
-                            // Compute local MD5
-                            let local_md5 = match compute_file_md5(local_path).await {
-                                Ok(md5) => md5,
-                                Err(e) => {
-                                    debug_log!("Failed to compute local MD5: {}, will upload", e);
-                                    String::new()
-                                }
-                            };
+            if let Ok(response) = stat_result {
+                if response.is_success() {
+                    if let Ok(remote_stat) = response.parse_stat() {
+                        if remote_stat.size == size {
+                            // Sizes match - check MD5 if verify is enabled
+                            if self.config.verify {
+                                // Compute local MD5
+                                let local_md5 = match compute_file_md5(local_path).await {
+                                    Ok(md5) => md5,
+                                    Err(e) => {
+                                        debug_log!("Failed to compute local MD5: {}, will upload", e);
+                                        String::new()
+                                    }
+                                };
 
-                            if !local_md5.is_empty() {
-                                // Get remote MD5
-                                let agent = pool.acquire().ok_or(StrawsError::AllAgentsUnhealthy)?;
-                                let md5_result = agent.request(&Request::md5(remote_path, 0, size)).await;
-                                pool.release(&agent);
+                                if !local_md5.is_empty() {
+                                    // Get remote MD5
+                                    let agent = pool.acquire().ok_or(StrawsError::AllAgentsUnhealthy)?;
+                                    let md5_result = agent.request(&Request::md5(remote_path, 0, size)).await;
+                                    pool.release(&agent);
 
-                                if let Ok(md5_response) = md5_result {
-                                    if md5_response.is_success() {
-                                        let remote_md5 = String::from_utf8_lossy(&md5_response.data).to_string();
-                                        if local_md5 == remote_md5 {
-                                            debug_log!(
-                                                "Skipping verified upload: {} (MD5 matches)",
-                                                remote_path
-                                            );
-                                            self.files_skipped.fetch_add(1, Ordering::Relaxed);
-                                            return Ok(());
-                                        } else {
-                                            debug_log!(
-                                                "MD5 mismatch for {}: local={} remote={}, will upload",
-                                                remote_path,
-                                                local_md5,
-                                                remote_md5
-                                            );
+                                    if let Ok(md5_response) = md5_result {
+                                        if md5_response.is_success() {
+                                            let remote_md5 = String::from_utf8_lossy(&md5_response.data).to_string();
+                                            if local_md5 == remote_md5 {
+                                                debug_log!(
+                                                    "Skipping verified upload: {} (MD5 matches)",
+                                                    remote_path
+                                                );
+                                                self.files_skipped.fetch_add(1, Ordering::Relaxed);
+                                                return Ok(());
+                                            } else {
+                                                debug_log!(
+                                                    "MD5 mismatch for {}: local={} remote={}, will upload",
+                                                    remote_path,
+                                                    local_md5,
+                                                    remote_md5
+                                                );
+                                            }
                                         }
                                     }
                                 }
+                            } else {
+                                // No verify - skip by size only
+                                debug_log!(
+                                    "Skipping existing remote file: {} (size matches)",
+                                    remote_path
+                                );
+                                self.files_skipped.fetch_add(1, Ordering::Relaxed);
+                                return Ok(());
                             }
-                        } else {
-                            // No verify - skip by size only
-                            debug_log!(
-                                "Skipping existing remote file: {} (size matches)",
-                                remote_path
-                            );
-                            self.files_skipped.fetch_add(1, Ordering::Relaxed);
-                            return Ok(());
                         }
                     }
                 }

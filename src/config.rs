@@ -58,6 +58,10 @@ pub struct Args {
     #[arg(long = "verify")]
     pub verify: bool,
 
+    /// Force transfer even if file already exists
+    #[arg(short = 'f', long = "force")]
+    pub force: bool,
+
     /// Disable progress display
     #[arg(long = "no-progress")]
     pub no_progress: bool,
@@ -151,6 +155,7 @@ pub struct Config {
     pub compress: bool,
     pub chunk_size: u64,
     pub verify: bool,
+    pub force: bool,
     pub no_progress: bool,
     pub debug_log: Option<PathBuf>,
     pub verbose: bool,
@@ -223,6 +228,7 @@ impl Config {
             compress: args.compress,
             chunk_size: args.chunk_size,
             verify: args.verify,
+            force: args.force,
             no_progress: args.no_progress,
             debug_log: args.debug_log,
             verbose: args.verbose,
