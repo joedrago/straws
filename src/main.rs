@@ -13,7 +13,7 @@ use straws::debug_log;
 use straws::error::{Result, StrawsError};
 use straws::file::finalize::{cleanup_temp, finalize_file};
 use straws::job::types::FileMeta;
-use straws::job::{Direction as JobDirection, Job, JobQueue, JobScheduler};
+use straws::job::{Job, JobQueue, JobScheduler};
 use straws::logger::init_logger;
 use straws::progress::{format_count, ProgressDisplay, ProgressTracker};
 use straws::transfer::{download_job, upload_job};
@@ -388,8 +388,8 @@ async fn worker_loop(
 
         // Execute job (tracker is updated incrementally during transfer)
         let result = match job.direction {
-            JobDirection::Download => download_job(&job, &agent, &tracker).await,
-            JobDirection::Upload => upload_job(&job, &agent, &tracker).await,
+            Direction::Download => download_job(&job, &agent, &tracker).await,
+            Direction::Upload => upload_job(&job, &agent, &tracker).await,
         };
 
         // Clear job info
@@ -405,7 +405,7 @@ async fn worker_loop(
                 // even if multiple chunks complete nearly simultaneously
                 if job.file_meta.is_complete() && !job.file_meta.finalize_attempted() {
                     // Finalize file (for downloads)
-                    if job.direction == JobDirection::Download {
+                    if job.direction == Direction::Download {
                         if let Err(e) = finalize_file(&job.file_meta) {
                             debug_log!("Failed to finalize {}: {}", job.file_meta.remote_path, e);
                             tracker.file_failed(

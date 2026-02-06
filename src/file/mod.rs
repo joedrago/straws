@@ -3,7 +3,6 @@
 
 pub mod finalize;
 pub mod metadata;
-pub mod sparse;
 
 pub use finalize::finalize_file;
 pub use metadata::{set_mode, set_mtime};

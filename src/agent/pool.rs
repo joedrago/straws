@@ -20,6 +20,7 @@ const STALL_TIMEOUT_SECS: u64 = 30;
 const INITIAL_PING_TIMEOUT_SECS: u64 = 10;
 const BATCH_SIZE: usize = 6;
 const BATCH_DELAY_MS: u64 = 300;
+const MAX_RESPONSE_SIZE: u64 = 256 * 1024 * 1024; // 256MB - cap to prevent OOM from corrupt data
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentState {
@@ -137,6 +138,13 @@ impl Agent {
 
         let header = ResponseHeader::decode(&header_buf)?;
 
+        if header.data_len > MAX_RESPONSE_SIZE {
+            return Err(StrawsError::Protocol(format!(
+                "Response data_len {} exceeds maximum {}",
+                header.data_len, MAX_RESPONSE_SIZE
+            )));
+        }
+
         // Read response data
         let mut data = vec![0u8; header.data_len as usize];
         if header.data_len > 0 {
@@ -225,6 +233,13 @@ impl Agent {
 
         let header = ResponseHeader::decode(&header_buf)?;
 
+        if header.data_len > MAX_RESPONSE_SIZE {
+            return Err(StrawsError::Protocol(format!(
+                "Response data_len {} exceeds maximum {}",
+                header.data_len, MAX_RESPONSE_SIZE
+            )));
+        }
+
         // Read response data
         let mut data = vec![0u8; header.data_len as usize];
         if header.data_len > 0 {
@@ -298,9 +313,10 @@ impl Agent {
         let header = ResponseHeader::decode(&header_buf)?;
 
         if header.status == ResponseStatus::Error {
-            // Read error message
-            let mut error_data = vec![0u8; header.data_len as usize];
-            if header.data_len > 0 {
+            // Read error message (cap at 64KB for error messages)
+            let error_len = std::cmp::min(header.data_len, 65536) as usize;
+            let mut error_data = vec![0u8; error_len];
+            if error_len > 0 {
                 timeout(
                     Duration::from_secs(STALL_TIMEOUT_SECS),
                     stdout.read_exact(&mut error_data),
@@ -405,7 +421,8 @@ impl Agent {
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
             .map_err(|e| StrawsError::Io(e))?;
 
-            let error_len = BigEndian::read_u64(&len_buf) as usize;
+            let raw_error_len = BigEndian::read_u64(&len_buf);
+            let error_len = std::cmp::min(raw_error_len, 65536) as usize;
             let mut error_data = vec![0u8; error_len];
             if error_len > 0 {
                 timeout(
@@ -809,11 +826,6 @@ impl AgentPool {
             .iter()
             .filter(|a| a.state() != AgentState::Unhealthy)
             .count()
-    }
-
-    /// Check if any healthy agents are available
-    pub fn has_available(&self) -> bool {
-        self.agents.iter().any(|a| a.is_available())
     }
 
     /// Get all agents

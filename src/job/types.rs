@@ -8,11 +8,7 @@ use std::sync::{Arc, OnceLock};
 
 use parking_lot::Mutex;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Direction {
-    Download,
-    Upload,
-}
+pub use crate::config::Direction;
 
 /// Metadata for a file being transferred
 pub struct FileMeta {

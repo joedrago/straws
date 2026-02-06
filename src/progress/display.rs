@@ -443,12 +443,13 @@ impl ProgressDisplay {
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    if s.chars().count() <= max_len {
         s.to_string()
     } else if max_len <= 3 {
         "...".to_string()
     } else {
-        format!("{}...", &s[..max_len - 3])
+        let truncated: String = s.chars().take(max_len - 3).collect();
+        format!("{}...", truncated)
     }
 }
 
@@ -457,4 +458,39 @@ fn visible_len(s: &str) -> usize {
     // Simple implementation - just count non-ANSI chars
     // This works because our strings don't have ANSI codes at this point
     s.chars().count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_ascii() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("hello world", 8), "hello...");
+        assert_eq!(truncate("ab", 2), "ab");
+        assert_eq!(truncate("abcd", 3), "...");
+    }
+
+    #[test]
+    fn test_truncate_unicode() {
+        // Multi-byte characters should not panic
+        assert_eq!(truncate("日本語テスト", 10), "日本語テスト");
+        assert_eq!(truncate("日本語テスト", 5), "日本...");
+        assert_eq!(truncate("日本語テスト.txt", 6), "日本語...");
+
+        // Emoji (4-byte chars)
+        assert_eq!(truncate("🎉🎊🎈test", 5), "🎉🎊...");
+
+        // Mixed ASCII and multi-byte
+        assert_eq!(truncate("café_naïve_test", 10), "café_na...");
+    }
+
+    #[test]
+    fn test_truncate_edge_cases() {
+        assert_eq!(truncate("", 5), "");
+        assert_eq!(truncate("a", 1), "a");
+        assert_eq!(truncate("ab", 1), "...");
+        assert_eq!(truncate("abcdef", 0), "...");
+    }
 }

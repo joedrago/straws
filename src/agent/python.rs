@@ -5,6 +5,37 @@ import sys, os, struct, hashlib
 
 CHUNK = 65536  # 64KB streaming chunks
 
+# Simple write file handle cache: keep the last written file open
+_write_cache_path = None
+_write_cache_fh = None
+
+def _get_write_fh(path):
+    """Get a file handle for writing, reusing cached handle if same path."""
+    global _write_cache_path, _write_cache_fh
+    if _write_cache_path == path and _write_cache_fh is not None:
+        return _write_cache_fh
+    # Close previous handle
+    if _write_cache_fh is not None:
+        try:
+            _write_cache_fh.close()
+        except Exception:
+            pass
+    # Open new handle
+    _write_cache_fh = open(path, 'r+b')
+    _write_cache_path = path
+    return _write_cache_fh
+
+def _close_write_cache():
+    """Close the cached write handle."""
+    global _write_cache_path, _write_cache_fh
+    if _write_cache_fh is not None:
+        try:
+            _write_cache_fh.close()
+        except Exception:
+            pass
+    _write_cache_fh = None
+    _write_cache_path = None
+
 def read_exact(n):
     """Read exactly n bytes from stdin"""
     data = b''
@@ -36,10 +67,8 @@ def handle_read(path, offset, length):
     """Read bytes from file"""
     try:
         with open(path, 'rb') as f:
-            f.seek(offset)
-            # Get actual readable length
-            f.seek(0, 2)
-            file_size = f.tell()
+            # Get file size without extra seeks using fstat
+            file_size = os.fstat(f.fileno()).st_size
             actual_len = min(length, max(0, file_size - offset))
             f.seek(offset)
 
@@ -72,12 +101,21 @@ def handle_write(path, offset, length, data):
         if parent and not os.path.exists(parent):
             os.makedirs(parent, exist_ok=True)
 
-        mode = 'r+b' if os.path.exists(path) else 'wb'
-        with open(path, mode) as f:
+        # Use cached file handle for repeated writes to same file
+        try:
+            f = _get_write_fh(path)
             f.seek(offset)
             f.write(data)
+            f.flush()
+        except (FileNotFoundError, OSError):
+            # File doesn't exist yet or cache stale, open fresh
+            _close_write_cache()
+            with open(path, 'wb') as f:
+                f.seek(offset)
+                f.write(data)
         write_response(0, b'')
     except Exception as e:
+        _close_write_cache()
         write_error(str(e))
 
 def handle_md5(path, offset, length):
@@ -127,6 +165,9 @@ def handle_stat(path):
 def handle_truncate(path, size):
     """Truncate/preallocate file to size"""
     try:
+        # Close cached write handle if it's for this file (we're about to truncate)
+        _close_write_cache()
+
         # Ensure parent directory exists
         parent = os.path.dirname(path)
         if parent and not os.path.exists(parent):
@@ -140,7 +181,6 @@ def handle_truncate(path, size):
 
 def compute_file_md5(fpath):
     """Compute MD5 hash of a file, return 32-char hex string."""
-    import hashlib
     h = hashlib.md5()
     try:
         with open(fpath, 'rb') as f:
@@ -150,8 +190,8 @@ def compute_file_md5(fpath):
                     break
                 h.update(chunk)
         return h.hexdigest()
-    except:
-        return '0' * 32  # Return zeros on error
+    except Exception:
+        return None
 
 def handle_find(base_path, with_md5=False):
     """Recursively find all files and stream their stats.
@@ -180,6 +220,8 @@ def handle_find(base_path, with_md5=False):
             sys.stdout.buffer.write(struct.pack('>QIQ', st.st_size, st.st_mode, int(st.st_mtime)))
             if with_md5:
                 md5_hex = compute_file_md5(fpath)
+                if md5_hex is None:
+                    md5_hex = '0' * 32
                 sys.stdout.buffer.write(md5_hex.encode('ascii'))
             entry_count += 1
             if entry_count % FLUSH_INTERVAL == 0:
@@ -248,6 +290,8 @@ def main():
                 break
             handle_write(path, offset, length, data)
         elif op == 2:  # MD5
+            # Close write cache before computing MD5 to ensure all data is flushed
+            _close_write_cache()
             handle_md5(path, offset, length)
         elif op == 3:  # MKDIR
             handle_mkdir(path)
@@ -269,12 +313,15 @@ if __name__ == '__main__':
 "#;
 
 /// Returns the Python agent code as a single-line command suitable for SSH exec
-pub fn agent_command() -> String {
-    // Escape the Python code for shell execution
-    let escaped = PYTHON_AGENT
-        .replace('\\', "\\\\")
-        .replace('\'', "'\"'\"'");
-    format!("exec python3 -c '{}'", escaped)
+pub fn agent_command() -> &'static str {
+    use std::sync::OnceLock;
+    static CACHED_COMMAND: OnceLock<String> = OnceLock::new();
+    CACHED_COMMAND.get_or_init(|| {
+        let escaped = PYTHON_AGENT
+            .replace('\\', "\\\\")
+            .replace('\'', "'\"'\"'");
+        format!("exec python3 -c '{}'", escaped)
+    })
 }
 
 #[cfg(test)]
@@ -286,5 +333,13 @@ mod tests {
         let cmd = agent_command();
         assert!(cmd.starts_with("exec python3 -c '"));
         assert!(cmd.contains("def main()"));
+    }
+
+    #[test]
+    fn test_agent_command_cached() {
+        // Verify caching works - same pointer returned
+        let cmd1 = agent_command();
+        let cmd2 = agent_command();
+        assert!(std::ptr::eq(cmd1, cmd2));
     }
 }

@@ -9,7 +9,7 @@ use crate::agent::AgentPool;
 use crate::config::Config;
 use crate::debug_log;
 use crate::error::{Result, StrawsError};
-use crate::transfer::download::compute_file_md5;
+use crate::transfer::io::compute_file_md5;
 
 /// Schedules jobs based on file enumeration
 pub struct JobScheduler {

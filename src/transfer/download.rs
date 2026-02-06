@@ -3,11 +3,10 @@
 
 use std::sync::Arc;
 
-use md5::{Digest, Md5};
-use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
 
-use super::io::open_write_at;
+use super::io::{compute_local_md5, open_write_at};
+pub use super::io::compute_file_md5;
 use crate::agent::Agent;
 use crate::debug_log;
 use crate::error::{Result, StrawsError};
@@ -118,46 +117,4 @@ pub async fn download_job(
     );
 
     Ok(JobResult::success(job.id, bytes_written, md5_hash))
-}
-
-async fn compute_local_md5(path: &std::path::Path, offset: u64, length: u64) -> Result<String> {
-    use tokio::io::AsyncReadExt;
-
-    let mut file = File::open(path).await.map_err(|e| StrawsError::Io(e))?;
-
-    if offset > 0 {
-        use tokio::io::AsyncSeekExt;
-        file.seek(std::io::SeekFrom::Start(offset))
-            .await
-            .map_err(|e| StrawsError::Io(e))?;
-    }
-
-    let mut hasher = Md5::new();
-    let mut remaining = length;
-    let mut buf = vec![0u8; IO_BUFFER_SIZE];
-
-    while remaining > 0 {
-        let to_read = std::cmp::min(remaining as usize, buf.len());
-        let n = file
-            .read(&mut buf[..to_read])
-            .await
-            .map_err(|e| StrawsError::Io(e))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        remaining -= n as u64;
-    }
-
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-/// Compute MD5 of an entire file
-pub async fn compute_file_md5(path: &std::path::Path) -> Result<String> {
-    let file_size = tokio::fs::metadata(path)
-        .await
-        .map_err(|e| StrawsError::Io(e))?
-        .len();
-
-    compute_local_md5(path, 0, file_size).await
 }
