@@ -20,8 +20,11 @@ def _get_write_fh(path):
             _write_cache_fh.close()
         except Exception:
             pass
-    # Open new handle
-    _write_cache_fh = open(path, 'r+b')
+    # Open existing file for read+write, or create new file
+    if os.path.exists(path):
+        _write_cache_fh = open(path, 'r+b')
+    else:
+        _write_cache_fh = open(path, 'wb')
     _write_cache_path = path
     return _write_cache_fh
 
@@ -102,17 +105,10 @@ def handle_write(path, offset, length, data):
             os.makedirs(parent, exist_ok=True)
 
         # Use cached file handle for repeated writes to same file
-        try:
-            f = _get_write_fh(path)
-            f.seek(offset)
-            f.write(data)
-            f.flush()
-        except (FileNotFoundError, OSError):
-            # File doesn't exist yet or cache stale, open fresh
-            _close_write_cache()
-            with open(path, 'wb') as f:
-                f.seek(offset)
-                f.write(data)
+        f = _get_write_fh(path)
+        f.seek(offset)
+        f.write(data)
+        f.flush()
         write_response(0, b'')
     except Exception as e:
         _close_write_cache()

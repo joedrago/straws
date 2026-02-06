@@ -86,6 +86,7 @@ impl FileMeta {
                 // Create and preallocate the file
                 let file = match std::fs::OpenOptions::new()
                     .create(true)
+                    .truncate(false)
                     .write(true)
                     .open(&temp_path)
                 {

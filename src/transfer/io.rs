@@ -17,20 +17,21 @@ pub async fn open_write_at(path: &Path, offset: u64) -> Result<File> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
     }
 
     let mut file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .write(true)
         .open(path)
         .await
-        .map_err(|e| StrawsError::Io(e))?;
+        .map_err(StrawsError::Io)?;
 
     if offset > 0 {
         file.seek(std::io::SeekFrom::Start(offset))
             .await
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
     }
 
     Ok(file)
@@ -38,12 +39,12 @@ pub async fn open_write_at(path: &Path, offset: u64) -> Result<File> {
 
 /// Compute MD5 of a byte range within a file
 pub async fn compute_local_md5(path: &Path, offset: u64, length: u64) -> Result<String> {
-    let mut file = File::open(path).await.map_err(|e| StrawsError::Io(e))?;
+    let mut file = File::open(path).await.map_err(StrawsError::Io)?;
 
     if offset > 0 {
         file.seek(std::io::SeekFrom::Start(offset))
             .await
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
     }
 
     let mut hasher = Md5::new();
@@ -55,7 +56,7 @@ pub async fn compute_local_md5(path: &Path, offset: u64, length: u64) -> Result<
         let n = file
             .read(&mut buf[..to_read])
             .await
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
         if n == 0 {
             break;
         }
@@ -70,7 +71,7 @@ pub async fn compute_local_md5(path: &Path, offset: u64, length: u64) -> Result<
 pub async fn compute_file_md5(path: &Path) -> Result<String> {
     let file_size = tokio::fs::metadata(path)
         .await
-        .map_err(|e| StrawsError::Io(e))?
+        .map_err(StrawsError::Io)?
         .len();
 
     compute_local_md5(path, 0, file_size).await

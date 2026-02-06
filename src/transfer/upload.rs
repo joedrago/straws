@@ -50,24 +50,24 @@ pub async fn upload_job(
 
         job.file_meta
             .store_truncate_result(result.map_err(|e| e.to_string()))
-            .map_err(|e| StrawsError::Remote(e))?;
+            .map_err(StrawsError::Remote)?;
     } else {
         // Another chunk already attempted truncation, get the cached result
         job.file_meta
             .store_truncate_result(Ok(()))
-            .map_err(|e| StrawsError::Remote(e))?;
+            .map_err(StrawsError::Remote)?;
     }
 
     // Read local file and upload in chunks
     let mut file = File::open(local_path)
         .await
-        .map_err(|e| StrawsError::Io(e))?;
+        .map_err(StrawsError::Io)?;
 
     if job.offset > 0 {
         use tokio::io::AsyncSeekExt;
         file.seek(std::io::SeekFrom::Start(job.offset))
             .await
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
     }
 
     let mut remaining = job.length;
@@ -96,7 +96,7 @@ pub async fn upload_job(
             let n = file
                 .read(&mut buf[..to_read])
                 .await
-                .map_err(|e| StrawsError::Io(e))?;
+                .map_err(StrawsError::Io)?;
 
             if n == 0 {
                 done_reading = true;

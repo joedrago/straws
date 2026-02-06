@@ -26,7 +26,7 @@ pub async fn download_job(
     // Ensure file is preallocated (only first chunk does the work, others wait/get cached result)
     job.file_meta
         .ensure_preallocated()
-        .map_err(|e| StrawsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        .map_err(|e| StrawsError::Io(std::io::Error::other(e)))?;
 
     // Open temp file at correct offset
     let file = open_write_at(&temp_path, job.offset).await?;
@@ -46,14 +46,14 @@ pub async fn download_job(
         )
         .await?;
 
-    writer.flush().await.map_err(|e| StrawsError::Io(e))?;
+    writer.flush().await.map_err(StrawsError::Io)?;
 
     // Sync to disk before marking chunk complete to ensure durability on crash
     writer
         .get_mut()
         .sync_all()
         .await
-        .map_err(|e| StrawsError::Io(e))?;
+        .map_err(StrawsError::Io)?;
 
     // Update file meta
     job.file_meta.add_bytes(bytes_written);

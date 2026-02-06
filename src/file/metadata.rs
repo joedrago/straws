@@ -12,7 +12,7 @@ pub fn set_mode(path: &Path, mode: u32) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let permissions = std::fs::Permissions::from_mode(mode);
-    std::fs::set_permissions(path, permissions).map_err(|e| StrawsError::Io(e))?;
+    std::fs::set_permissions(path, permissions).map_err(StrawsError::Io)?;
 
     Ok(())
 }
@@ -30,8 +30,8 @@ pub fn set_mtime(path: &Path, mtime: u64) -> Result<()> {
     let time = UNIX_EPOCH + Duration::from_secs(mtime);
 
     // Use filetime crate functionality via std
-    let file = File::open(path).map_err(|e| StrawsError::Io(e))?;
-    file.set_modified(time).map_err(|e| StrawsError::Io(e))?;
+    let file = File::open(path).map_err(StrawsError::Io)?;
+    file.set_modified(time).map_err(StrawsError::Io)?;
 
     Ok(())
 }

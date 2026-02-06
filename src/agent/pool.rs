@@ -111,12 +111,12 @@ impl Agent {
             timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.write_all(&encoded))
                 .await
                 .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-                .map_err(|e| StrawsError::Io(e))?;
+                .map_err(StrawsError::Io)?;
 
             timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.flush())
                 .await
                 .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-                .map_err(|e| StrawsError::Io(e))?;
+                .map_err(StrawsError::Io)?;
         }
 
         // Read response header
@@ -133,7 +133,7 @@ impl Agent {
             )
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
         }
 
         let header = ResponseHeader::decode(&header_buf)?;
@@ -159,7 +159,7 @@ impl Agent {
             )
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
             self.add_bytes(header.data_len);
         }
@@ -188,7 +188,7 @@ impl Agent {
         timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.write_all(&encoded))
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
         if bytes_sent > 0 {
             self.add_bytes(bytes_sent);
@@ -208,7 +208,7 @@ impl Agent {
         timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.flush())
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
         Ok(())
     }
@@ -229,7 +229,7 @@ impl Agent {
         )
         .await
         .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-        .map_err(|e| StrawsError::Io(e))?;
+        .map_err(StrawsError::Io)?;
 
         let header = ResponseHeader::decode(&header_buf)?;
 
@@ -249,7 +249,7 @@ impl Agent {
             )
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
             self.add_bytes(header.data_len);
         }
@@ -289,12 +289,12 @@ impl Agent {
         timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.write_all(&encoded))
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
         timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.flush())
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
         let stdout = stdout_guard
             .as_mut()
@@ -308,22 +308,21 @@ impl Agent {
         )
         .await
         .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-        .map_err(|e| StrawsError::Io(e))?;
+        .map_err(StrawsError::Io)?;
 
         let header = ResponseHeader::decode(&header_buf)?;
 
         if header.status == ResponseStatus::Error {
-            // Read error message (cap at 64KB for error messages)
-            let error_len = std::cmp::min(header.data_len, 65536) as usize;
-            let mut error_data = vec![0u8; error_len];
-            if error_len > 0 {
+            // Read full error message (already bounded by MAX_RESPONSE_SIZE above)
+            let mut error_data = vec![0u8; header.data_len as usize];
+            if header.data_len > 0 {
                 timeout(
                     Duration::from_secs(STALL_TIMEOUT_SECS),
                     stdout.read_exact(&mut error_data),
                 )
                 .await
                 .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-                .map_err(|e| StrawsError::Io(e))?;
+                .map_err(StrawsError::Io)?;
             }
             let msg = String::from_utf8_lossy(&error_data).to_string();
             return Err(StrawsError::Remote(msg));
@@ -343,12 +342,12 @@ impl Agent {
             )
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
             writer
                 .write_all(&buf[..to_read])
                 .await
-                .map_err(|e| StrawsError::Io(e))?;
+                .map_err(StrawsError::Io)?;
 
             remaining -= to_read as u64;
             total_written += to_read as u64;
@@ -360,7 +359,7 @@ impl Agent {
             }
         }
 
-        writer.flush().await.map_err(|e| StrawsError::Io(e))?;
+        writer.flush().await.map_err(StrawsError::Io)?;
 
         Ok(total_written)
     }
@@ -389,12 +388,12 @@ impl Agent {
         timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.write_all(&encoded))
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
         timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stdin.flush())
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
         let stdout = stdout_guard
             .as_mut()
@@ -408,7 +407,7 @@ impl Agent {
         )
         .await
         .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-        .map_err(|e| StrawsError::Io(e))?;
+        .map_err(StrawsError::Io)?;
 
         if status_buf[0] != 0 {
             // Error - read data_len and error message
@@ -419,10 +418,16 @@ impl Agent {
             )
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
             let raw_error_len = BigEndian::read_u64(&len_buf);
-            let error_len = std::cmp::min(raw_error_len, 65536) as usize;
+            if raw_error_len > MAX_RESPONSE_SIZE {
+                return Err(StrawsError::Protocol(format!(
+                    "Error data_len {} exceeds maximum {}",
+                    raw_error_len, MAX_RESPONSE_SIZE
+                )));
+            }
+            let error_len = raw_error_len as usize;
             let mut error_data = vec![0u8; error_len];
             if error_len > 0 {
                 timeout(
@@ -431,7 +436,7 @@ impl Agent {
                 )
                 .await
                 .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-                .map_err(|e| StrawsError::Io(e))?;
+                .map_err(StrawsError::Io)?;
             }
             return Err(StrawsError::Remote(
                 String::from_utf8_lossy(&error_data).to_string(),
@@ -448,7 +453,7 @@ impl Agent {
             )
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
             let path_len = BigEndian::read_u16(&path_len_buf) as usize;
 
@@ -466,7 +471,7 @@ impl Agent {
             )
             .await
             .map_err(|_| StrawsError::Stall(STALL_TIMEOUT_SECS))?
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
             // Parse entry
             let entry_path = String::from_utf8_lossy(&entry_buf[..path_len]).to_string();
@@ -623,12 +628,6 @@ impl AgentPool {
                         || stderr_lower.contains("wrong password")
                     {
                         auth_errors.push(stderr.trim().to_string());
-                    } else if stderr_lower.contains("could not resolve")
-                        || stderr_lower.contains("connection refused")
-                        || stderr_lower.contains("connection timed out")
-                        || stderr_lower.contains("no route to host")
-                    {
-                        other_errors.push(stderr.trim().to_string());
                     } else {
                         other_errors.push(stderr.trim().to_string());
                     }

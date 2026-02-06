@@ -108,7 +108,7 @@ impl ProgressDisplay {
         let eta = self.tracker.eta_secs();
 
         let eta_str = eta
-            .map(|s| format_duration(s))
+            .map(format_duration)
             .unwrap_or_else(|| "--:--".to_string());
 
         let _ = execute!(stdout, Print("\n"));
@@ -446,7 +446,7 @@ fn truncate(s: &str, max_len: usize) -> String {
     if s.chars().count() <= max_len {
         s.to_string()
     } else if max_len <= 3 {
-        "...".to_string()
+        s.chars().take(max_len).collect()
     } else {
         let truncated: String = s.chars().take(max_len - 3).collect();
         format!("{}...", truncated)
@@ -469,7 +469,7 @@ mod tests {
         assert_eq!(truncate("hello", 10), "hello");
         assert_eq!(truncate("hello world", 8), "hello...");
         assert_eq!(truncate("ab", 2), "ab");
-        assert_eq!(truncate("abcd", 3), "...");
+        assert_eq!(truncate("abcd", 3), "abc");
     }
 
     #[test]
@@ -490,7 +490,7 @@ mod tests {
     fn test_truncate_edge_cases() {
         assert_eq!(truncate("", 5), "");
         assert_eq!(truncate("a", 1), "a");
-        assert_eq!(truncate("ab", 1), "...");
-        assert_eq!(truncate("abcdef", 0), "...");
+        assert_eq!(truncate("ab", 1), "a");
+        assert_eq!(truncate("abcdef", 0), "");
     }
 }

@@ -22,7 +22,7 @@ impl Logger {
                     .write(true)
                     .truncate(true)
                     .open(p)
-                    .map_err(|e| StrawsError::Io(e))?;
+                    .map_err(StrawsError::Io)?;
                 Some(Mutex::new(BufWriter::new(file)))
             }
             None => None,

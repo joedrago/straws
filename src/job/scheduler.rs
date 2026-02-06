@@ -74,7 +74,7 @@ impl JobScheduler {
         if remote_paths.len() > 1 || self.config.remote.path.contains('*') {
             tokio::fs::create_dir_all(local_dest)
                 .await
-                .map_err(|e| StrawsError::Io(e))?;
+                .map_err(StrawsError::Io)?;
         }
 
         for remote_path in remote_paths {
@@ -317,7 +317,7 @@ impl JobScheduler {
 
         if should_chunk {
             // Calculate chunk count based on configured chunk size
-            let chunk_count = ((stat.size + chunk_size - 1) / chunk_size) as u32;
+            let chunk_count = stat.size.div_ceil(chunk_size) as u32;
 
             let file_meta = Arc::new(FileMeta::new(
                 remote_path.to_string(),
@@ -390,7 +390,7 @@ impl JobScheduler {
 
             let metadata = tokio::fs::metadata(local_path)
                 .await
-                .map_err(|e| StrawsError::Io(e))?;
+                .map_err(StrawsError::Io)?;
 
             if metadata.is_dir() {
                 // Trailing slash on local path means "copy contents" (rsync convention)
@@ -447,15 +447,15 @@ impl JobScheduler {
     ) -> Result<()> {
         let mut entries = tokio::fs::read_dir(local_dir)
             .await
-            .map_err(|e| StrawsError::Io(e))?;
+            .map_err(StrawsError::Io)?;
 
-        while let Some(entry) = entries.next_entry().await.map_err(|e| StrawsError::Io(e))? {
+        while let Some(entry) = entries.next_entry().await.map_err(StrawsError::Io)? {
             if pool.is_aborted() {
                 break;
             }
 
             let path = entry.path();
-            let metadata = entry.metadata().await.map_err(|e| StrawsError::Io(e))?;
+            let metadata = entry.metadata().await.map_err(StrawsError::Io)?;
 
             let relative = path
                 .strip_prefix(local_dir)
@@ -576,7 +576,7 @@ impl JobScheduler {
 
         if should_chunk {
             // Calculate chunk count based on configured chunk size
-            let chunk_count = ((size + chunk_size - 1) / chunk_size) as u32;
+            let chunk_count = size.div_ceil(chunk_size) as u32;
 
             let file_meta = Arc::new(FileMeta::new(
                 remote_path.to_string(),

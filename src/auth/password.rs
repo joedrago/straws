@@ -57,7 +57,7 @@ fn read_password_file(path: &Path) -> Result<String> {
 fn prompt_password() -> Result<String> {
     // Write prompt to stderr (so it doesn't mix with output)
     eprint!("Password: ");
-    io::stderr().flush().map_err(|e| StrawsError::Io(e))?;
+    io::stderr().flush().map_err(StrawsError::Io)?;
 
     // Read password with terminal raw mode for hidden input
     let password = read_password_raw()?;
@@ -110,7 +110,7 @@ fn read_password_raw() -> Result<String> {
         libc::tcsetattr(fd, libc::TCSANOW, &original);
     }
 
-    result.map_err(|e| StrawsError::Io(e))?;
+    result.map_err(StrawsError::Io)?;
 
     // Trim newline
     Ok(password.trim_end_matches(&['\r', '\n'][..]).to_string())
@@ -122,6 +122,6 @@ fn read_password_raw() -> Result<String> {
     io::stdin()
         .lock()
         .read_line(&mut password)
-        .map_err(|e| StrawsError::Io(e))?;
+        .map_err(StrawsError::Io)?;
     Ok(password.trim_end_matches(&['\r', '\n'][..]).to_string())
 }

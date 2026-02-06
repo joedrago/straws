@@ -18,7 +18,7 @@ pub fn finalize_file(file_meta: &Arc<FileMeta>) -> Result<()> {
     // preventing a race where multiple threads could call do_finalize() and
     // the losing thread's error would be cached instead of the winner's success.
     let result = file_meta.ensure_finalized(|| do_finalize(file_meta));
-    result.map_err(|e| StrawsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))
+    result.map_err(|e| StrawsError::Io(std::io::Error::other(e)))
 }
 
 /// Internal finalization logic

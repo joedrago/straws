@@ -9,7 +9,10 @@
       "Bash(grep:*)",
       "Bash(wc:*)",
       "Bash(git show:*)",
-      "Bash(ssh:*)"
+      "Bash(ssh:*)",
+      "Bash(cargo tree:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(ls:*)"
     ]
   }
 }
