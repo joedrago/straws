@@ -12,7 +12,7 @@ use crate::error::{Result, StrawsError};
 use crate::transfer::io::compute_file_md5;
 
 /// Minimum chunk size when splitting files across tunnels (5MB)
-const MIN_CHUNK_SIZE: u64 = 5 * 1024 * 1024;
+pub const MIN_CHUNK_SIZE: u64 = 5 * 1024 * 1024;
 
 /// Schedules jobs based on file enumeration
 pub struct JobScheduler {

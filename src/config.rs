@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use crate::error::{Result, StrawsError};
+use crate::job::scheduler::MIN_CHUNK_SIZE;
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -226,7 +227,7 @@ impl Config {
             identity: args.identity,
             password,
             compress: args.compress,
-            chunk_size: args.chunk_size,
+            chunk_size: args.chunk_size.max(MIN_CHUNK_SIZE),
             verify: args.verify,
             force: args.force,
             no_progress: args.no_progress,
