@@ -79,16 +79,19 @@ impl ProgressDisplay {
         let source = self.tracker.source_desc();
         let dest = self.tracker.dest_desc();
         if !source.is_empty() {
+            let max_len = width.saturating_sub(6); // "  · " / "  → " prefix + margin
+            let src_display = truncate_middle(&source, max_len);
+            let dest_display = truncate_middle(&dest, max_len);
             let _ = execute!(stdout, Print("\n"));
             let _ = execute!(
                 stdout,
                 Print("  "),
-                SetForegroundColor(Color::Cyan),
-                Print(&source),
-                ResetColor,
-                Print(" → "),
-                SetForegroundColor(Color::Green),
-                Print(&dest),
+                SetForegroundColor(Color::DarkGrey),
+                Print("· "),
+                Print(&src_display),
+                Print("\n"),
+                Print("  → "),
+                Print(&dest_display),
                 ResetColor,
                 Print("\n")
             );
@@ -117,7 +120,7 @@ impl ProgressDisplay {
             stdout,
             Print("  "),
             SetAttribute(Attribute::Bold),
-            SetForegroundColor(Color::Rgb { r: 255, g: 255, b: 80 }),
+            SetForegroundColor(Color::Rgb { r: 180, g: 150, b: 255 }),
             Print(&bar_filled),
             SetAttribute(Attribute::Reset),
             SetForegroundColor(Color::DarkGrey),
@@ -271,7 +274,7 @@ impl ProgressDisplay {
             let (symbol, color) = match state {
                 AgentState::Starting => ("○", Color::Yellow),
                 AgentState::Ready => ("○", Color::DarkGrey),
-                AgentState::Busy => ("●", Color::Green),
+                AgentState::Busy => ("●", Color::Rgb { r: 120, g: 100, b: 180 }),
                 AgentState::Unhealthy => ("✕", Color::Red),
             };
 
@@ -445,6 +448,22 @@ impl ProgressDisplay {
         println!();
         let _ = stdout.flush();
     }
+}
+
+fn truncate_middle(s: &str, max_len: usize) -> String {
+    let len = s.chars().count();
+    if len <= max_len {
+        return s.to_string();
+    }
+    if max_len <= 3 {
+        return s.chars().take(max_len).collect();
+    }
+    let keep = max_len - 3; // room for "..."
+    let front = (keep + 1) / 2;
+    let back = keep / 2;
+    let head: String = s.chars().take(front).collect();
+    let tail: String = s.chars().skip(len - back).collect();
+    format!("{}...{}", head, tail)
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
