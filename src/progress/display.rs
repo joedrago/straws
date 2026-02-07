@@ -99,7 +99,8 @@ impl ProgressDisplay {
         let filled = ((percent / 100.0) * PROGRESS_BAR_WIDTH as f64) as usize;
         let empty = PROGRESS_BAR_WIDTH.saturating_sub(filled);
 
-        let bar: String = "█".repeat(filled) + &"░".repeat(empty);
+        let bar_filled: String = "█".repeat(filled);
+        let bar_empty: String = "░".repeat(empty);
 
         // Stats
         let transferred = self.tracker.bytes_transferred();
@@ -115,8 +116,12 @@ impl ProgressDisplay {
         let _ = execute!(
             stdout,
             Print("  "),
-            SetForegroundColor(Color::Green),
-            Print(&bar),
+            SetAttribute(Attribute::Bold),
+            SetForegroundColor(Color::Rgb { r: 255, g: 255, b: 80 }),
+            Print(&bar_filled),
+            SetAttribute(Attribute::Reset),
+            SetForegroundColor(Color::DarkGrey),
+            Print(&bar_empty),
             ResetColor,
             Print(format!(" {:5.1}%\n", percent))
         );
