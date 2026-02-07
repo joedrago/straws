@@ -11,6 +11,9 @@ use crate::debug_log;
 use crate::error::{Result, StrawsError};
 use crate::transfer::io::compute_file_md5;
 
+/// Minimum chunk size when splitting files across tunnels (5MB)
+const MIN_CHUNK_SIZE: u64 = 5 * 1024 * 1024;
+
 /// Schedules jobs based on file enumeration
 pub struct JobScheduler {
     config: Config,
@@ -316,8 +319,12 @@ impl JobScheduler {
         let should_chunk = stat.size > chunk_size && tunnel_count > 1;
 
         if should_chunk {
-            // Calculate chunk count based on configured chunk size
-            let chunk_count = stat.size.div_ceil(chunk_size) as u32;
+            // Calculate chunk count: use enough chunks to utilize available tunnels,
+            // but respect the configured max chunk size and don't go below MIN_CHUNK_SIZE
+            let min_chunks = stat.size.div_ceil(chunk_size) as u32;
+            let max_chunks = stat.size.div_ceil(MIN_CHUNK_SIZE) as u32;
+            let chunk_count = (tunnel_count as u32).clamp(min_chunks, max_chunks);
+            let effective_chunk_size = stat.size.div_ceil(chunk_count as u64);
 
             let file_meta = Arc::new(FileMeta::new(
                 remote_path.to_string(),
@@ -328,10 +335,10 @@ impl JobScheduler {
                 chunk_count,
             ));
 
-            // Create chunk jobs - each chunk is at most chunk_size bytes
+            // Create chunk jobs
             for i in 0..chunk_count {
-                let offset = i as u64 * chunk_size;
-                let length = std::cmp::min(chunk_size, stat.size.saturating_sub(offset));
+                let offset = i as u64 * effective_chunk_size;
+                let length = std::cmp::min(effective_chunk_size, stat.size.saturating_sub(offset));
 
                 if length > 0 {
                     let job = Arc::new(Job::chunk(
@@ -575,8 +582,12 @@ impl JobScheduler {
         let should_chunk = size > chunk_size && tunnel_count > 1;
 
         if should_chunk {
-            // Calculate chunk count based on configured chunk size
-            let chunk_count = size.div_ceil(chunk_size) as u32;
+            // Calculate chunk count: use enough chunks to utilize available tunnels,
+            // but respect the configured max chunk size and don't go below MIN_CHUNK_SIZE
+            let min_chunks = size.div_ceil(chunk_size) as u32;
+            let max_chunks = size.div_ceil(MIN_CHUNK_SIZE) as u32;
+            let chunk_count = (tunnel_count as u32).clamp(min_chunks, max_chunks);
+            let effective_chunk_size = size.div_ceil(chunk_count as u64);
 
             let file_meta = Arc::new(FileMeta::new(
                 remote_path.to_string(),
@@ -587,10 +598,10 @@ impl JobScheduler {
                 chunk_count,
             ));
 
-            // Create chunk jobs - each chunk is at most chunk_size bytes
+            // Create chunk jobs
             for i in 0..chunk_count {
-                let offset = i as u64 * chunk_size;
-                let length = std::cmp::min(chunk_size, size.saturating_sub(offset));
+                let offset = i as u64 * effective_chunk_size;
+                let length = std::cmp::min(effective_chunk_size, size.saturating_sub(offset));
 
                 if length > 0 {
                     let job = Arc::new(Job::chunk(
